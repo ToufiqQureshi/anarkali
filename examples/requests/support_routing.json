@@ -1,0 +1,28 @@
+{
+  "state": {
+    "ticket": "Customer cannot log in after an SSO certificate rotation. Password reset did not help.",
+    "customer_tier": "enterprise",
+    "recent_changes": ["identity provider certificate updated", "new SAML metadata uploaded"]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": "Choose the best support queue for this ticket.",
+      "criteria": {
+        "billing": "Billing, invoices, refunds or plan changes.",
+        "identity": "Authentication, SSO, SCIM or user provisioning.",
+        "product": "Product usage, configuration or workflow help.",
+        "incident": "A widespread service outage or degraded platform."
+      }
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": "This ticket requires urgent escalation."
+    },
+    "complexity": {
+      "type": "score",
+      "instructions": "Estimate the support complexity.",
+      "criteria": ["simple", "moderate", "complex", "specialist"]
+    }
+  }
+}

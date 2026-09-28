@@ -1,0 +1,12 @@
+Anarkali
+Copyright 2026 Toufiq Qureshi
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components and data:
+- jhu-clsp/ettin-encoder-68m (MIT License) is the encoder of the released V3 model.
+- microsoft/MiniLM-L12-H384-uncased (MIT License) is the default training encoder.
+- LocalLLaMA/typed-decisions (Apache-2.0) is the training and benchmark dataset.
+- The /v1/systemone request and answer format follows TypeSafe's public Jev API
+  documentation; the typed-question design follows Jev and Laya
+  (NandhaKishorM/laya, Apache-2.0). No Jev outputs are used for training.

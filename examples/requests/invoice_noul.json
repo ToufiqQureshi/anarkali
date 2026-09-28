@@ -1,0 +1,24 @@
+{
+  "state": {
+    "invoice": "INV-2026-0917",
+    "amount": 48120,
+    "currency": "INR",
+    "line_items": ["annual workspace subscription", "priority support"],
+    "approval_policy": "Invoices above 40000 INR require finance approval before payment."
+  },
+  "questions": {
+    "needs_finance_approval": {
+      "type": "noul",
+      "instructions": "The invoice needs finance approval before payment.",
+      "criteria": {
+        "false": "The invoice can be paid without finance approval.",
+        "true": "The invoice must be approved by finance before payment."
+      }
+    },
+    "payment_priority": {
+      "type": "score",
+      "instructions": "How quickly should payment operations review this invoice?",
+      "criteria": ["low", "normal", "high", "same day"]
+    }
+  }
+}

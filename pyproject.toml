@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anarkali"
+version = "0.3.0"
+description = "Compact typed decision engine with a Jev-compatible API"
+requires-python = ">=3.10"
+readme = "README.md"
+dependencies = []
+
+[project.optional-dependencies]
+neural = ["torch>=2.5,<3"]
+encoder = ["torch>=2.5,<3", "transformers>=4.48,<6", "safetensors>=0.4"]
+onnx = ["numpy", "onnxruntime>=1.18", "tokenizers>=0.19", "huggingface_hub"]
+serve = ["numpy", "onnxruntime>=1.18", "tokenizers>=0.19", "huggingface_hub", "fastapi", "uvicorn"]
+train = ["torch>=2.5,<3", "transformers>=4.48,<6", "safetensors>=0.4", "sentencepiece", "protobuf", "huggingface_hub"]
+
+[project.scripts]
+anarkali = "anarkali.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,9 @@
+{
+  "state": "Mere account se payment do baar cut gayi. Refund chahiye.",
+  "question": "Which team should handle this request?",
+  "candidates": [
+    {"id": "billing", "text": "Payment problems, invoices, duplicate charges and refunds"},
+    {"id": "technical", "text": "Software errors, login failures and service outages"},
+    {"id": "sales", "text": "Pricing questions, quotations and new subscriptions"}
+  ]
+}
