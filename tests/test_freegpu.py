@@ -12,10 +12,10 @@ from test_relabel import FakeTeachers, decision
 REPO = Path(__file__).resolve().parents[1]
 
 
-def load(name):
+def load(name, folder="freegpu"):
     if name in sys.modules:
         return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, REPO / folder / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -40,8 +40,8 @@ def write_split_dir(root: Path):
 class Server:
     @classmethod
     def setUpClass(cls):
-        cls.relabel, cls.worker, cls.orchestrator = load("relabel_with_teachers"), load("gpu_worker"), \
-            load("gpu_orchestrator")
+        cls.relabel, cls.worker, cls.orchestrator = load("relabel_with_teachers", "scripts"), load("worker"), \
+            load("orchestrator")
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeTeachers)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}/v1"
@@ -157,7 +157,7 @@ class DecideTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.decide = staticmethod(load("gpu_orchestrator").decide)
+        cls.decide = staticmethod(load("orchestrator").decide)
 
     def status(self, heartbeats=(), launches=None, finished=False):
         return {"finished": finished, "heartbeats": list(heartbeats), "launches": launches or {}}
@@ -222,9 +222,24 @@ class TickTests(Server, unittest.TestCase):
             orchestrator.LAUNCHERS.update(saved)
 
 
+class DetectionTests(unittest.TestCase):
+    def test_provider_and_secret_lookup(self):
+        from unittest.mock import patch
+        worker, hub = load("worker"), load("hub")
+        with patch.dict("os.environ", {"KAGGLE_KERNEL_RUN_TYPE": "Batch"}, clear=False):
+            self.assertEqual(worker.detect_provider(), "kaggle")
+        with patch.dict("os.environ", {"COLAB_RELEASE_TAG": "x"}, clear=False):
+            import os
+            os.environ.pop("KAGGLE_KERNEL_RUN_TYPE", None)
+            self.assertEqual(worker.detect_provider(), "colab")
+        with patch.dict("os.environ", {"ANARKALI_TEST_SECRET": "s3cret"}):
+            self.assertEqual(hub.find_secret("ANARKALI_TEST_SECRET"), "s3cret")
+        self.assertIsNone(hub.find_secret("ANARKALI_SECRET_THAT_IS_NOT_SET"))
+
+
 class LauncherTests(unittest.TestCase):
     def test_kaggle_kernel_is_valid(self):
-        orchestrator = load("gpu_orchestrator")
+        orchestrator = load("orchestrator")
         with tempfile.TemporaryDirectory() as tmp:
             kernel = orchestrator.kaggle_kernel_dir(Path(tmp), username="me", hub="hf:me/work", job="toy",
                                                     repo_url="https://github.com/o/r", ref="main", hours=8)
@@ -234,13 +249,14 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(meta["machine_shape"], "NvidiaTeslaT4")
             source = (kernel / "run.py").read_text(encoding="utf-8")
             compile(source, "run.py", "exec")
-            self.assertIn("'--provider', 'kaggle'", source.replace('"', "'"))
+            self.assertIn("anarkali/freegpu/worker.py", source)
+            self.assertNotIn("--provider", source)  # the worker detects Kaggle itself
 
     def test_colab_link_and_tokenless_notice(self):
-        orchestrator = load("gpu_orchestrator")
+        orchestrator = load("orchestrator")
         link = orchestrator.colab_link("https://github.com/o/r.git", "main")
-        self.assertEqual(link, "https://colab.research.google.com/github/o/r/blob/main/notebooks/gpu_worker_colab.ipynb")
-        self.assertTrue((REPO / "notebooks" / "gpu_worker_colab.ipynb").exists())
+        self.assertEqual(link, "https://colab.research.google.com/github/o/r/blob/main/freegpu/worker.ipynb")
+        self.assertTrue((REPO / "freegpu" / "worker.ipynb").exists())
 
 
 if __name__ == "__main__":

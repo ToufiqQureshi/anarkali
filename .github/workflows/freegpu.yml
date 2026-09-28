@@ -1,4 +1,4 @@
-name: GPU orchestrator
+name: Free GPU orchestrator
 
 # Moves a relabelling job between free GPU providers. Set these once in the repo settings:
 #   variables: ANARKALI_HUB (hf:owner/repo), ANARKALI_JOB
@@ -13,7 +13,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: gpu-orchestrator
+  group: freegpu
   cancel-in-progress: false
 
 jobs:
@@ -33,4 +33,4 @@ jobs:
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python scripts/gpu_orchestrator.py --hub "${{ vars.ANARKALI_HUB }}" --job "${{ vars.ANARKALI_JOB }}" tick
+          python freegpu/orchestrator.py --hub "${{ vars.ANARKALI_HUB }}" --job "${{ vars.ANARKALI_JOB }}" tick

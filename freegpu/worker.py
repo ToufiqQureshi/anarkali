@@ -1,9 +1,12 @@
 """Advance a relabelling job on whatever GPU this machine has, then hand it back to the hub.
 
 Run the same command on Kaggle, Colab or any other box; workers pick up where the last one
-stopped because teacher scores are cached in the hub (see gpu_hub.py):
+stopped because teacher scores are cached in the hub (see hub.py):
 
-    python scripts/gpu_worker.py --hub hf:you/anarkali-work --job typed-v2 --provider kaggle --max-hours 8
+    python freegpu/worker.py --hub hf:you/anarkali-work --job typed-v2 --max-hours 8
+
+The provider (colab, kaggle or other) is detected, and HF_TOKEN is read from the
+environment, Colab secrets or Kaggle secrets, so the same command runs everywhere.
 
 For each teacher in job.json not yet marked done, the worker starts `vllm serve` (or uses
 the teacher's own base_url, e.g. Groq), fills the cache with relabel_with_teachers.py
@@ -26,13 +29,21 @@ import threading
 import time
 import urllib.request
 
-SCRIPTS = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPTS))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
-from gpu_hub import open_hub  # noqa: E402
+from hub import open_hub  # noqa: E402
 
-RELABEL = SCRIPTS / "relabel_with_teachers.py"
+RELABEL = HERE.parent / "scripts" / "relabel_with_teachers.py"
 OFFLINE_URL = "http://offline.invalid/v1"
+
+
+def detect_provider() -> str:
+    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
+        return "kaggle"
+    if os.environ.get("COLAB_RELEASE_TAG") or "google.colab" in sys.modules:
+        return "colab"
+    return "other"
 
 
 def free_port() -> int:
@@ -143,7 +154,8 @@ def main(argv: list[str] | None = None) -> str:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--hub", required=True, help="hf:owner/repo or a shared directory")
     parser.add_argument("--job", required=True)
-    parser.add_argument("--provider", default=os.environ.get("ANARKALI_PROVIDER", "local"))
+    parser.add_argument("--provider", default=os.environ.get("ANARKALI_PROVIDER") or detect_provider(),
+                        help="label for heartbeats and worker ids (default: detected)")
     parser.add_argument("--worker", default=None, help="unique worker id (default provider-timestamp)")
     parser.add_argument("--max-hours", type=float, default=None,
                         help="stop cleanly before the provider's session limit")

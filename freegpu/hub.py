@@ -101,9 +101,28 @@ class HfHub(LocalHub):
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def find_secret(name: str) -> str | None:
+    """An environment variable, else a Colab secret, else a Kaggle secret of that name."""
+    import os
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        from google.colab import userdata
+        return userdata.get(name)
+    except Exception:
+        pass
+    try:
+        from kaggle_secrets import UserSecretsClient
+        return UserSecretsClient().get_secret(name)
+    except Exception:
+        return None
+
+
 def open_hub(spec: str):
     """'hf:owner/repo' for the Hugging Face Hub, anything else is a local or mounted directory."""
     if spec.startswith("hf:"):
-        import os
-        return HfHub(spec[3:], token=os.environ.get("HF_TOKEN"))
+        token = find_secret("HF_TOKEN")
+        if not token:
+            raise SystemExit("HF_TOKEN not found in the environment, Colab secrets or Kaggle secrets")
+        return HfHub(spec[3:], token=token)
     return LocalHub(spec)
