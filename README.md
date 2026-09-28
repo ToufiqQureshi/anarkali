@@ -181,10 +181,6 @@ python scripts/relabel_with_teachers.py --input artifacts/typed-decisions-v2 --o
 
 API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's licence before training on its outputs.
 
-### Run it across free GPUs
-
-A long relabelling run does not fit in one free GPU session. [`freegpu/`](freegpu/) splits it across Kaggle, Colab and any other GPU box: every session saves its progress to a private Hugging Face repo, and the next one carries on from there. Kaggle is started automatically; Colab needs one click on a link it sends you. See [`freegpu/README.md`](freegpu/README.md).
-
 The export only ships a graph that matches PyTorch on 200 development decisions (0 changed answers for the released fp32 model; every int8 variant failed and was dropped).
 
 Tests: `python -m unittest discover -s tests`
