@@ -11,6 +11,10 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](pyproject.toml)
 ![Parameters: 68M](https://img.shields.io/badge/parameters-68M-8A2BE2)
 
+<img src="assets/anarkali-demo.gif" alt="Anarkali routes a support ticket, then its benchmark against Laya and Jev" width="800">
+
+<sub>[Watch with sound](assets/anarkali-launch.mp4) · 21 s</sub>
+
 </div>
 
 ---
