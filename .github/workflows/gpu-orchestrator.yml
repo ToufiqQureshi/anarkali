@@ -1,0 +1,36 @@
+name: GPU orchestrator
+
+# Moves a relabelling job between free GPU providers. Set these once in the repo settings:
+#   variables: ANARKALI_HUB (hf:owner/repo), ANARKALI_JOB
+#   secrets:   HF_TOKEN, KAGGLE_USERNAME, KAGGLE_KEY
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gpu-orchestrator
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    if: vars.ANARKALI_JOB != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install huggingface_hub kaggle
+      - name: Tick
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/gpu_orchestrator.py --hub "${{ vars.ANARKALI_HUB }}" --job "${{ vars.ANARKALI_JOB }}" tick

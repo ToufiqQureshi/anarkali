@@ -181,6 +181,23 @@ python scripts/relabel_with_teachers.py --input artifacts/typed-decisions-v2 --o
 
 API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's licence before training on its outputs.
 
+### Run it across free GPUs
+
+A long relabelling job can move between free GPU providers on its own. A private Hugging Face dataset repo holds the job, and every worker writes its teacher scores there in its own cache shard, so a new session on any provider picks up where the last one stopped.
+
+```bash
+# once: upload the job (teachers in examples/gpu/job.json fit a single 16 GB T4)
+python scripts/gpu_orchestrator.py --hub hf:<you>/anarkali-work --job typed-v2 submit \
+  --config examples/gpu/job.json --input artifacts/typed-decisions-v2
+python scripts/gpu_orchestrator.py --hub hf:<you>/anarkali-work --job typed-v2 status
+```
+
+- `.github/workflows/gpu-orchestrator.yml` runs a tick every hour. If no worker has sent a heartbeat recently, it starts one on Kaggle through the official Kaggle API, after checking the weekly GPU quota.
+- When Kaggle is out of quota, the tick opens a GitHub issue with a one-click link to [`notebooks/gpu_worker_colab.ipynb`](notebooks/gpu_worker_colab.ipynb). Colab has no launch API, so someone has to press **Run all**.
+- When every teacher is done, the relabelled set appears in `jobs/<job>/output/`.
+- Setup: add repo variables `ANARKALI_HUB` and `ANARKALI_JOB` and secrets `HF_TOKEN`, `KAGGLE_USERNAME` and `KAGGLE_KEY`. On Kaggle, attach a secret named `HF_TOKEN` to the `anarkali-gpu-worker` notebook once.
+- Use one account per provider and follow each provider's terms.
+
 The export only ships a graph that matches PyTorch on 200 development decisions (0 changed answers for the released fp32 model; every int8 variant failed and was dropped).
 
 Tests: `python -m unittest discover -s tests`

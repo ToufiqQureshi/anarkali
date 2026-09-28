@@ -1,0 +1,17 @@
+{
+  "splits": "train",
+  "relabel_args": ["--min-agreement", "0.667", "--workers", "8"],
+  "teachers": [
+    {
+      "name": "qwen",
+      "model": "Qwen/Qwen3-14B-AWQ",
+      "vllm_args": ["--dtype", "half", "--max-model-len", "4096", "--gpu-memory-utilization", "0.92"],
+      "extra_body": {"chat_template_kwargs": {"enable_thinking": false}}
+    },
+    {
+      "name": "mistral",
+      "model": "casperhansen/mistral-nemo-instruct-2407-awq",
+      "vllm_args": ["--dtype", "half", "--max-model-len", "4096", "--gpu-memory-utilization", "0.92"]
+    }
+  ]
+}

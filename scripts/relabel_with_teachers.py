@@ -151,17 +151,34 @@ def score_prompt(teacher: Teacher, prompt: str, k: int, samples: int) -> tuple[l
     return normalized([float(c) for c in counts]), "sample"
 
 
-class Cache:
-    """Append-only JSONL of prompt scores, so a rate-limited run resumes where it stopped."""
+class CacheMiss(RuntimeError):
+    pass
 
-    def __init__(self, path: Path):
-        self.path, self.lock, self.entries = path, threading.Lock(), {}
-        if path.exists():
+
+class Cache:
+    """Directory of append-only JSONL shards of prompt scores, so interrupted runs resume.
+
+    Every shard is read; new scores go to <shard>.jsonl only, so workers on different
+    machines never write the same file. A line cut off by a killed session is skipped.
+    """
+
+    def __init__(self, directory: Path, shard: str = "local", offline: bool = False):
+        self.lock, self.entries, self.offline = threading.Lock(), {}, offline
+        if not shard or not all(ch.isalnum() or ch in "-_." for ch in shard):
+            raise ValueError(f"cache shard must be a plain file name, got {shard!r}")
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = directory / f"{shard}.jsonl"
+        # A torn final line from a killed session must not swallow the next entry.
+        if self.path.exists() and self.path.stat().st_size and not self.path.read_bytes().endswith(b"\n"):
+            with self.path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write("\n")
+        for path in sorted(directory.glob("*.jsonl")):
             for line in path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
+                try:
                     entry = json.loads(line)
                     self.entries[entry["key"]] = entry
-        path.parent.mkdir(parents=True, exist_ok=True)
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
 
     @staticmethod
     def key(teacher: Teacher, prompt: str, samples: int) -> str:
@@ -188,6 +205,8 @@ def teacher_distribution(teacher: Teacher, row: dict, cache: Cache, samples: int
         key = Cache.key(teacher, prompt, samples)
         entry = cache.get(key)
         if entry is None:
+            if cache.offline:
+                raise CacheMiss(f"{teacher.name}: no cached score for row {row.get('case_id')} (offline run)")
             probs, source = score_prompt(teacher, prompt, k, samples)
             entry = {"key": key, "teacher": teacher.name, "probs": probs, "source": source}
             cache.put(entry)
@@ -237,6 +256,27 @@ def write_jsonl(path: Path, rows: list[dict]):
             stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
+def score_only(args, teachers: list[Teacher], cache: Cache, splits: list[str]) -> dict:
+    """Fill the cache for the given teachers; relabelling happens in a later offline run."""
+    scored = {}
+    for name in splits:
+        rows = load_jsonl(args.input / f"{name}.jsonl")
+        rows = [row for row in (rows if args.limit is None else rows[:args.limit])
+                if len(row["candidates"]) <= len(LETTERS)]
+
+        def job(row):
+            for teacher in teachers:
+                teacher_distribution(teacher, row, cache, args.samples, args.orders)
+
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            for index, _ in enumerate(pool.map(job, rows), 1):
+                if index % 50 == 0 or index == len(rows):
+                    print(f"{name}: scored {index}/{len(rows)} rows", flush=True)
+        scored[name] = len(rows)
+    print(json.dumps({"scored": scored, "cache": str(cache.path)}), flush=True)
+    return {"scored": scored}
+
+
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, required=True, help="prepared decision directory with manifest.json")
@@ -252,11 +292,26 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--rpm", type=float, default=0.0, help="max requests per minute per teacher (0 = no limit)")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--limit", type=int, default=None, help="relabel only the first N rows per split")
+    parser.add_argument("--teacher-extra", action="append", default=[],
+                        help="NAME=JSON request fields for one teacher, overriding --extra-body (repeat)")
+    parser.add_argument("--cache-dir", type=Path, default=None,
+                        help="shared score cache directory (default <output>/teacher-cache)")
+    parser.add_argument("--cache-shard", default="local", help="file name this run appends to inside --cache-dir")
+    parser.add_argument("--offline", action="store_true",
+                        help="never call a teacher; fail on any score missing from the cache")
+    parser.add_argument("--only-score", action="store_true",
+                        help="fill the cache for these teachers and write nothing else (one GPU, one teacher at a time)")
     parser.add_argument("--extra-body", type=json.loads, default={},
                         help='JSON merged into every request, e.g. \'{"chat_template_kwargs": {"enable_thinking": false}}\'')
     args = parser.parse_args(argv)
 
     teachers = [Teacher.parse(spec, args.rpm, args.mode, args.extra_body) for spec in args.teacher]
+    by_name = {t.name: t for t in teachers}
+    for item in args.teacher_extra:
+        name, sep, raw = item.partition("=")
+        if not sep or name not in by_name:
+            raise SystemExit(f"--teacher-extra must be NAME=JSON for a given teacher, got {item!r}")
+        by_name[name].extra_body = json.loads(raw)
     if len({t.name for t in teachers}) != len(teachers) or "original" in {t.name for t in teachers}:
         raise SystemExit("teacher names must be unique and must not be 'original'")
     splits = [name.strip() for name in args.splits.split(",") if name.strip()]
@@ -269,7 +324,9 @@ def main(argv: list[str] | None = None):
 
     source_manifest = json.loads((args.input / "manifest.json").read_text(encoding="utf-8"))
     args.output.mkdir(parents=True, exist_ok=True)
-    cache = Cache(args.output / "teacher-cache.jsonl")
+    cache = Cache(args.cache_dir or args.output / "teacher-cache", args.cache_shard, args.offline)
+    if args.only_score:
+        return score_only(args, teachers, cache, splits)
     counts, stats = {}, {}
     for name in SPLIT_NAMES:
         path = args.output / f"{name}.jsonl"
