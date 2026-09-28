@@ -78,6 +78,19 @@ def main():
     parser.add_argument("--selection-metric", choices=("soft_ce", "accuracy_then_ce"), default="soft_ce")
     parser.add_argument("--no-amp", action="store_true",
                         help="Train in float32 on CUDA; DeBERTa-v3 can overflow under fp16 autocast")
+    # V4 objectives and optimisation (packed architecture; all off by default, see anarkali/objectives.py)
+    parser.add_argument("--brier-weight", type=float, default=0.0, help="add w * Brier score to soft CE")
+    parser.add_argument("--rps-weight", type=float, default=0.0,
+                        help="add w * ranked probability score on score (ordinal) questions")
+    parser.add_argument("--consistency-weight", type=float, default=0.0,
+                        help="second pass under another option order; add w * symmetric KL between them")
+    parser.add_argument("--weight-field", default=None,
+                        help="weight each row's loss by this numeric field, e.g. teacher_agreement")
+    parser.add_argument("--llrd", type=float, default=1.0, help="layer-wise learning-rate decay per encoder layer")
+    parser.add_argument("--warmup-ratio", type=float, default=0.0)
+    parser.add_argument("--schedule", choices=("constant", "linear", "cosine"), default="constant")
+    parser.add_argument("--ema-decay", type=float, default=0.0,
+                        help="evaluate and save an exponential moving average of the weights (e.g. 0.999)")
     args = parser.parse_args()
     args.output = args.output or REPO / "artifacts" / f"anarkali-{args.architecture}-v2"
     if args.epochs < 1 or args.batch_size < 1:
@@ -90,6 +103,13 @@ def main():
         raise ValueError("learning rates must be finite and positive")
     if not math.isfinite(args.target_power) or args.target_power < 1 or args.target_power > 4:
         raise ValueError("target-power must be finite and in [1, 4]")
+    if min(args.brier_weight, args.rps_weight, args.consistency_weight) < 0 or not 0 <= args.warmup_ratio < 1:
+        raise ValueError("loss weights must be nonnegative and warmup-ratio in [0, 1)")
+    if not 0 < args.llrd <= 1 or not 0 <= args.ema_decay < 1:
+        raise ValueError("llrd must be in (0, 1] and ema-decay in [0, 1)")
+    use_objectives = bool(args.brier_weight or args.rps_weight or args.consistency_weight or args.weight_field)
+    if use_objectives and args.architecture != "packed":
+        raise ValueError("--brier/--rps/--consistency/--weight-field need --architecture packed")
 
     import numpy as np
     import torch
@@ -100,6 +120,8 @@ def main():
     from anarkali.joint import JointChoiceModel, collate_joint
     from anarkali.packed import PackedChoiceModel, collate_packed, shuffle_candidates
     from anarkali.diagnostics import development_controls, state_ablations
+    from anarkali.objectives import (EMA, decision_losses, layerwise_groups, lr_lambda, ordinal_index,
+                                     row_weights, shuffle_with_index, symmetric_kl, to_original_order)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -154,11 +176,30 @@ def main():
                   "candidate_order_augmentation": args.architecture == "packed",
                   "train_decisions": len(train_rows), "development_decisions": len(dev_rows),
                   "precision": "cuda_fp16_autocast" if use_amp else "float32"}
-    optimizer = torch.optim.AdamW([
-        {"params": model.encoder.parameters(), "lr": args.encoder_lr},
-        {"params": model.head.parameters(), "lr": args.head_lr},
-    ], weight_decay=0.01)
+    if args.llrd < 1:
+        optimizer = torch.optim.AdamW(layerwise_groups(model, args.encoder_lr, args.head_lr, args.llrd))
+    else:
+        optimizer = torch.optim.AdamW([
+            {"params": model.encoder.parameters(), "lr": args.encoder_lr},
+            {"params": model.head.parameters(), "lr": args.head_lr},
+        ], weight_decay=0.01)
+    steps_per_epoch = (len(train_rows) + args.batch_size - 1) // args.batch_size
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda(args.epochs * steps_per_epoch, args.warmup_ratio, args.schedule))
+    ema = EMA(model, args.ema_decay) if args.ema_decay else None
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+
+    def objective(rows, out, targets):
+        return decision_losses(out.logits, out.candidate_mask, targets, brier_weight=args.brier_weight,
+                               rps_weight=args.rps_weight,
+                               ordinal=ordinal_index(rows, targets.shape[1]) if args.rps_weight else None,
+                               weights=row_weights(rows, args.weight_field))["loss"]
+
+    def sharpen(targets):
+        if args.target_power == 1:
+            return targets
+        targets = targets.pow(args.target_power)
+        return targets / targets.sum(-1, keepdim=True)
 
     def evaluate(rows):
         model.eval()
@@ -188,18 +229,33 @@ def main():
         random.Random(args.seed + epoch).shuffle(order)
         running, steps, skipped_steps = 0.0, 0, 0
         for start in range(0, len(order), args.batch_size):
-            part = [train_rows[i] for i in order[start:start + args.batch_size]]
+            original = [train_rows[i] for i in order[start:start + args.batch_size]]
+            part = original
             if args.architecture == "packed":
-                part = shuffle_candidates(part, random.Random(args.seed + epoch * 100000 + start))
+                shuffle_rng = random.Random(args.seed + epoch * 100000 + start)
+                if use_objectives:
+                    part, index_a = shuffle_with_index(original, shuffle_rng)
+                else:
+                    part = shuffle_candidates(original, shuffle_rng)
             values = make_batch(part)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
                 out = model(*values[:-1])
-                targets = values[-1]
-                if args.target_power != 1:
-                    targets = targets.pow(args.target_power)
-                    targets = targets / targets.sum(-1, keepdim=True)
-                loss = training_loss(out, targets)["loss"]
+                targets = sharpen(values[-1])
+                if not use_objectives:
+                    loss = training_loss(out, targets)["loss"]
+                else:
+                    loss = objective(part, out, targets)
+                    if args.consistency_weight:
+                        part_b, index_b = shuffle_with_index(original, random.Random(shuffle_rng.random()))
+                        values_b = make_batch(part_b)
+                        out_b = model(*values_b[:-1])
+                        loss = 0.5 * (loss + objective(part_b, out_b, sharpen(values_b[-1])))
+                        probs_a = to_original_order(torch.softmax(out.logits.float(), -1), index_a)
+                        probs_b = to_original_order(torch.softmax(out_b.logits.float(), -1), index_b)
+                        valid = torch.arange(probs_a.shape[1], device=probs_a.device)[None, :] < \
+                            torch.tensor([len(r["candidates"]) for r in original], device=probs_a.device)[:, None]
+                        loss = loss + args.consistency_weight * symmetric_kl(probs_a, probs_b, valid)
             if not torch.isfinite(loss.detach()).item():
                 raise RuntimeError("nonfinite training loss")
             scaler.scale(loss).backward()
@@ -208,6 +264,9 @@ def main():
             previous_scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            scheduler.step()
+            if ema is not None:
+                ema.update(model)
             skipped_steps += int(scaler.get_scale() < previous_scale)
             running += float(loss.detach()) * len(part)
             steps += 1
@@ -217,6 +276,8 @@ def main():
                                   "batch_loss": float(loss.detach()),
                                   "skipped_optimizer_steps": skipped_steps,
                                   "elapsed_seconds": time.perf_counter()-epoch_started}), flush=True)
+        if ema is not None:
+            ema.apply_to(model)
         dev_loss, dev_accuracy = evaluate(dev_rows)
         record = {"epoch": epoch, "train_loss": running / len(train_rows),
                   "development_soft_ce": dev_loss, "development_argmax_accuracy": dev_accuracy,
@@ -237,6 +298,8 @@ def main():
                         "model_revision": revision, "head_config": model.head.config.__dict__,
                         "seed": args.seed, "epoch": epoch, "manifest": manifest,
                         "run_config": run_config}, args.output / "best.pt")
+        if ema is not None:
+            ema.restore(model)
     (args.output / "training.json").write_text(json.dumps({
         "model_id": args.model, "model_revision": revision, "device": str(device),
         "epochs": args.epochs, "batch_size": args.batch_size, "seed": args.seed,

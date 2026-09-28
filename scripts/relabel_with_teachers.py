@@ -7,8 +7,9 @@ the endpoint returns them, otherwise from repeated samples (coarser: steps of 1/
 
 The new target averages every teacher (and, by default, the existing target). Rows whose
 teachers pick different winners are dropped from the relabelled split and written to
-dropped-<split>.jsonl for review. The test split is always copied untouched, so benchmark
-scores stay comparable with earlier releases.
+dropped-<split>.jsonl for review. A labelled test split is always copied untouched, so
+benchmark scores stay comparable; only a generated test split whose rows all have
+label_source "none" can be labelled, and only with --no-original.
 
 Use non-thinking models (e.g. Qwen3-*-Instruct-2507): a leading <think> token hides the
 letter. For hybrid Qwen3 on vLLM pass --extra-body '{"chat_template_kwargs": {"enable_thinking": false}}'.
@@ -282,7 +283,8 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--input", type=Path, required=True, help="prepared decision directory with manifest.json")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--teacher", action="append", required=True, help="NAME=MODEL@BASE_URL (repeat)")
-    parser.add_argument("--splits", default="train", help="comma-separated splits to relabel; never test")
+    parser.add_argument("--splits", default="train",
+                        help="comma-separated splits to relabel; test only for unlabelled generated sets")
     parser.add_argument("--mode", choices=("auto", "logprobs", "sample"), default="auto")
     parser.add_argument("--samples", type=int, default=5, help="samples per prompt when logprobs are unavailable")
     parser.add_argument("--orders", type=int, default=3, help="cyclic option orders per row")
@@ -315,10 +317,15 @@ def main(argv: list[str] | None = None):
     if len({t.name for t in teachers}) != len(teachers) or "original" in {t.name for t in teachers}:
         raise SystemExit("teacher names must be unique and must not be 'original'")
     splits = [name.strip() for name in args.splits.split(",") if name.strip()]
-    if "test" in splits:
-        raise SystemExit("the test split is never relabelled; benchmark scores must stay comparable")
     if not set(splits) <= set(SPLIT_NAMES):
-        raise SystemExit(f"--splits must be a subset of {', '.join(SPLIT_NAMES[:-1])}")
+        raise SystemExit(f"--splits must be a subset of {', '.join(SPLIT_NAMES)}")
+    if "test" in splits:
+        # A test split with real labels is never relabelled, so benchmark scores stay comparable.
+        # One that was generated without labels (label_source "none") has nothing to protect.
+        test_rows = load_jsonl(args.input / "test.jsonl")
+        if not args.no_original or not test_rows or any(r.get("label_source") != "none" for r in test_rows):
+            raise SystemExit("the test split is relabelled only when every row has label_source 'none' "
+                             "and --no-original is set; benchmark scores must stay comparable")
     if not 0 < args.min_agreement <= 1 or args.samples < 1 or args.orders < 1 or args.workers < 1:
         raise SystemExit("invalid --min-agreement, --samples, --orders or --workers")
 

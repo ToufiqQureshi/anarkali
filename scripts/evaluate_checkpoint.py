@@ -36,6 +36,20 @@ def fit_temperature(rows):
     return min(grid, key=lambda t: sum(soft_ce(r['logits'], r['target'], t) for r in rows))
 
 
+def fit_temperature_by_type(rows):
+    """One temperature per question type, fitted on held-out rows."""
+    by_type = defaultdict(list)
+    for r in rows:
+        by_type[r.get('question_type', 'choice')].append(r)
+    return {kind: fit_temperature(part) for kind, part in sorted(by_type.items())}
+
+
+def with_temperature_by_type(rows, temperatures):
+    """Rows whose logits are pre-divided by their type's temperature, for metrics(rows, 1.0)."""
+    return [dict(r, logits=[x / temperatures.get(r.get('question_type', 'choice'), 1.0) for x in r['logits']])
+            for r in rows]
+
+
 def metrics(rows, temperature):
     out = defaultdict(lambda: {'n': 0, 'correct': 0, 'ce': 0.0, 'brier': 0.0, 'conf': [], 'hit': []})
     for r in rows:
@@ -131,15 +145,19 @@ def main():
 
     calibration = score(load_rows(args.data/'calibration.jsonl'))
     temperature = fit_temperature(calibration)
+    temperature_by_type = fit_temperature_by_type(calibration)
     test_rows = load_rows(args.data/'test.jsonl')
     test = score(test_rows)
     reversed_rows = [dict(r, candidates=r['candidates'][::-1], target=r['target'][::-1]) for r in test_rows]
     flips = 0
+    averaged = []  # original and reversed order averaged: the engine's orders=2 for two options
     for original, rev in zip(test, score(reversed_rows)):
         ids = [c['id'] for c in original['candidates']]
         rev_ids = [c['id'] for c in rev['candidates']]
         flips += (ids[max(range(len(ids)), key=original['logits'].__getitem__)]
                   != rev_ids[max(range(len(rev_ids)), key=rev['logits'].__getitem__)])
+        mean = [(a + b) / 2 for a, b in zip(softmax(original['logits'], 1.0), softmax(rev['logits'][::-1], 1.0))]
+        averaged.append(dict(original, logits=[math.log(max(p, 1e-12)) for p in mean]))
 
     latencies = []
     with torch.inference_mode():
@@ -175,7 +193,10 @@ def main():
         'parameters': sum(p.numel() for p in model.parameters()),
         'temperature_fitted_on': 'calibration split (source-group disjoint from train/dev/test)',
         'temperature': temperature,
+        'temperature_by_type': temperature_by_type,
         'test_uncalibrated': metrics(test, 1.0), 'test_calibrated': metrics(test, temperature),
+        'test_calibrated_by_type': metrics(with_temperature_by_type(test, temperature_by_type), 1.0),
+        'test_order_averaged_uncalibrated': metrics(averaged, 1.0),
         'calibration_uncalibrated': metrics(calibration, 1.0)['all'],
         'order_reversal_argmax_change_fraction': flips / len(test),
         'selective_uncalibrated': selective(test, 1.0),
