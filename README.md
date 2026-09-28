@@ -169,6 +169,18 @@ python scripts/evaluate_checkpoint.py --checkpoint best.pt --data artifacts/type
 python scripts/export_onnx.py --checkpoint best.pt --output release
 ```
 
+### Relabel with open teachers
+
+`scripts/relabel_with_teachers.py` relabels the training split with several open LLMs (for example Qwen and Mistral) through any OpenAI-compatible endpoint: vLLM on a free Kaggle or Colab GPU, Groq or OpenRouter. Each teacher is averaged over 3 option orders, rows the teachers disagree on go to `dropped-train.jsonl` for review, and the test split is copied byte for byte so benchmark scores stay comparable. Responses are cached, so a run cut short by a rate limit resumes where it stopped.
+
+```bash
+python scripts/relabel_with_teachers.py --input artifacts/typed-decisions-v2 --output artifacts/typed-decisions-v2-relabel \
+  --teacher qwen=Qwen/Qwen3-30B-A3B-Instruct-2507@http://localhost:8000/v1 \
+  --teacher mistral=<mistral-model-id>@https://openrouter.ai/api/v1 --rpm 20
+```
+
+API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's licence before training on its outputs.
+
 The export only ships a graph that matches PyTorch on 200 development decisions (0 changed answers for the released fp32 model; every int8 variant failed and was dropped).
 
 Tests: `python -m unittest discover -s tests`
