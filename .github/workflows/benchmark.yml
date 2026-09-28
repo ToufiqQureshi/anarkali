@@ -18,6 +18,11 @@ on:
 permissions:
   contents: read
 
+# A newer push replaces a running benchmark instead of queueing beside it.
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest

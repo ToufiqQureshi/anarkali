@@ -123,6 +123,16 @@ curl -s localhost:8000/v1/systemone -d @examples/requests/support_routing.json
 
 Set `ANARKALI_API_KEY` to require a bearer token.
 
+### Order averaging and calibrated temperatures
+
+The packed encoder reads options at fixed positions, so reordering them can change a borderline answer. Pass `orders` to score each question under several cyclic option orders and average the probabilities. The cost is `orders` times the compute.
+
+```python
+engine = Engine.load("toufiqqureshi651/anarkali", orders=3)   # or: anarkali serve --orders 3
+```
+
+`anarkali.json` may also carry `temperature_by_type`: one temperature per question type, fitted on held-out data. `scripts/benchmark_release.py` fits them on the calibration split and measures every variant on the test split. The **Benchmark** workflow runs it on the released model.
+
 ## Coding decisions
 
 | Workflow | Questions | Accuracy |
@@ -132,6 +142,8 @@ Set `ANARKALI_API_KEY` to require a bearer token.
 | `coding_agent_step` | next_action · constraint_violation · progress | 70.0% |
 
 Measured on 440 held-out cases (78.6% overall). These cases are synthetic and rule-labelled, so they show the workflows work, not how the model does on your repositories. A GitHub Action example lives in [`examples/github/`](examples/github/).
+
+A Claude Code guardrail hook that asks `constraint_violation` before each tool call lives in [`examples/claude-code/`](examples/claude-code/). It is a demo until the model is trained on real agent traces.
 
 ## How it works
 
@@ -196,6 +208,16 @@ API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's
 ```bash
 python scripts/import_agent_traces.py --per-source 2000 --output artifacts/agent-step-traces-v0
 ```
+
+### Training V4
+
+[`notebooks/Anarkali_V4.ipynb`](notebooks/Anarkali_V4.ipynb) rebuilds the data from its sources and trains a bake-off on one T4. It runs the 0.3.0 recipe as the control against recipes using the V4 training options:
+- Brier and ranked-probability losses
+- option-order consistency
+- layer-wise LR decay, warmup and EMA
+- `--shared-option-positions`: every option starts at the same position ID, so the encoder cannot see the order of the options. The ModernBERT/Ettin local window is measured in positions too.
+
+It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) has the plan and the reasoning.
 
 ## Limits
 
