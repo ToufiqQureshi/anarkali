@@ -185,6 +185,18 @@ python scripts/relabel_with_teachers.py --input artifacts/typed-decisions-v2 --o
 
 API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's licence before training on its outputs.
 
+### Real agent traces for `coding_agent_step`
+
+`scripts/import_agent_traces.py` turns public coding-agent runs into `coding_agent_step` decisions. It uses four Hugging Face datasets: nebius SWE-agent (CC-BY-4.0), nebius SWE-rebench OpenHands (CC-BY-4.0), nvidia SWE-Zero OpenHands (CC-BY-4.0) and Kwai-Klear SWE-smith (MIT).
+- Labels are weak. Progress comes from the run's outcome, next action from what a successful agent did next, and violations from rule patterns.
+- A share of steps get an injected rule-breaking action, such as a force push or editing tests.
+- Splits are by GitHub issue.
+- Relabel the result with teachers, and keep a hand-labelled set for the final score.
+
+```bash
+python scripts/import_agent_traces.py --per-source 2000 --output artifacts/agent-step-traces-v0
+```
+
 ## Limits
 
 - English only.
