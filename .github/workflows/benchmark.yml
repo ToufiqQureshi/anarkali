@@ -5,6 +5,9 @@ name: Benchmark
 on:
   workflow_dispatch:
     inputs:
+      model:
+        description: "released model directory or Hugging Face repo id"
+        default: "toufiqqureshi651/anarkali"
       variants:
         description: "space-separated variants, e.g. orders=1 orders=3 orders=1,max_tokens=1024"
         default: "orders=1 orders=2 orders=3 orders=1,max_tokens=1024"
@@ -29,6 +32,7 @@ jobs:
     timeout-minutes: 180
     env:
       VARIANTS: ${{ github.event.inputs.variants || 'orders=1 orders=2 orders=3 orders=1,max_tokens=1024' }}
+      MODEL: ${{ github.event.inputs.model || 'toufiqqureshi651/anarkali' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,7 +51,7 @@ jobs:
         run: python scripts/prepare_typed_decisions.py --question-types choice,noul,score --output artifacts/typed-decisions-v2
       - name: Benchmark
         run: |
-          python scripts/benchmark_release.py --model toufiqqureshi651/anarkali \
+          python scripts/benchmark_release.py --model "$MODEL" \
             --data artifacts/typed-decisions-v2 --output artifacts/benchmark --variants $VARIANTS
       - uses: actions/upload-artifact@v4
         if: always()

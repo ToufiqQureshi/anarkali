@@ -8,7 +8,20 @@ version = "0.3.0"
 description = "Compact typed decision engine with a Jev-compatible API"
 requires-python = ">=3.10"
 readme = "README.md"
+license = {text = "Apache-2.0"}
+keywords = ["typed decisions", "calibration", "classification", "onnx", "ai agents", "guardrails", "jev"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ToufiqQureshi/anarkali"
+Model = "https://huggingface.co/toufiqqureshi651/anarkali"
+Roadmap = "https://github.com/ToufiqQureshi/anarkali/blob/main/ROADMAP.md"
 
 [project.optional-dependencies]
 neural = ["torch>=2.5,<3"]

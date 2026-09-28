@@ -145,6 +145,26 @@ def markdown(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def recommend(report: dict, tolerance: float = 0.002) -> dict | None:
+    """Release settings: the cheapest variant within `tolerance` of the best accuracy, ties by lower KL.
+
+    Accuracy is raw argmax (temperatures do not change it); KL is after the per-type temperatures.
+    """
+    variants = report["variants"]
+    if not variants:
+        return None
+    best = max(v["test_raw"]["all"]["accuracy"] for v in variants.values())
+    close = [(name, v) for name, v in variants.items() if v["test_raw"]["all"]["accuracy"] >= best - tolerance]
+    name, chosen = min(close, key=lambda item: (item[1]["orders"], item[1]["test_calibrated"]["all"]["kl_from_gold"]))
+    config = {"orders": chosen["orders"], "temperature_by_type": chosen["temperatures"]}
+    if chosen["max_tokens"] != next(iter(variants.values()))["max_tokens"]:
+        config["max_tokens"] = chosen["max_tokens"]
+    return {"variant": name, "anarkali_json": config,
+            "accuracy": chosen["test_raw"]["all"]["accuracy"],
+            "kl_from_gold_calibrated": chosen["test_calibrated"]["all"]["kl_from_gold"],
+            "ece_calibrated": chosen["test_calibrated"]["all"]["ece_15_bins"]}
+
+
 def main(argv: list[str] | None = None) -> dict:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="released model directory or Hugging Face repo id")
@@ -186,9 +206,13 @@ def main(argv: list[str] | None = None) -> dict:
                           "ece_raw": summary["test_raw"]["all"]["ece_15_bins"],
                           "ece_calibrated": summary["test_calibrated"]["all"]["ece_15_bins"],
                           "temperatures": temperatures, "ms_per_decision": round(ms, 1)}), flush=True)
+    report["recommended"] = recommend(report)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "benchmark.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     table = markdown(report)
+    if report["recommended"]:
+        table += ("\nRecommended release settings (merge into `anarkali.json`): `"
+                  + json.dumps(report["recommended"]["anarkali_json"]) + f"` from `{report['recommended']['variant']}`\n")
     (args.output / "benchmark.md").write_text(table, encoding="utf-8")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
