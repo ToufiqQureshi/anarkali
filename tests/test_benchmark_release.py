@@ -57,6 +57,10 @@ class BenchmarkTests(unittest.TestCase):
             self.assertAlmostEqual(one["test_raw"]["all"]["accuracy"], 0.25)
             self.assertAlmostEqual(four["test_raw"]["all"]["accuracy"], 1.0)
             self.assertEqual(set(four["temperatures"]), {"choice", "score"})
+            for variant in (one, four):
+                kl = variant["test_calibrated"]["all"]["kl_from_gold"]
+                self.assertGreaterEqual(kl, -1e-9)
+                self.assertLess(kl, variant["test_calibrated"]["all"]["soft_ce"])
             self.assertIn("type:score", four["test_calibrated"])
             self.assertEqual(report["variants"]["orders=1,max_tokens=300"]["max_tokens"], 300)
             table = (Path(tmp) / "out" / "benchmark.md").read_text(encoding="utf-8")

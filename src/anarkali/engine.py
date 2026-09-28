@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 from typing import Any
 
-from .packing import pack_row
+from .packing import pack_row, shared_option_positions
 from .typed import MAX_OPTIONS, format_answer, question_candidates, softmax
 
 MAX_QUESTIONS = 64
@@ -32,19 +32,23 @@ class _FastTokenizer:
         return self._tok.encode(text, add_special_tokens=add_special_tokens).ids
 
 
-def _batch_arrays(packed, pad_id):
+def _batch_arrays(packed, pad_id, shared_positions=False):
+    """(input_ids, mask, spans), plus position_ids when options share positions."""
     import numpy as np
     width = max(len(ids) for ids, _, _ in packed)
     k = max(len(spans) for _, spans, _ in packed)
     input_ids = np.full((len(packed), width), pad_id, dtype=np.int64)
     mask = np.zeros((len(packed), width), dtype=np.int64)
     spans = np.zeros((len(packed), k, width), dtype=np.float32)
+    positions = np.zeros((len(packed), width), dtype=np.int64)
     for i, (ids, ranges, _) in enumerate(packed):
         input_ids[i, :len(ids)] = ids
         mask[i, :len(ids)] = 1
         for j, (start, end) in enumerate(ranges):
             spans[i, j, start:end] = 1.0
-    return input_ids, mask, spans
+        if shared_positions:
+            positions[i, :len(ids)] = shared_option_positions(len(ids), ranges)
+    return (input_ids, mask, spans, positions) if shared_positions else (input_ids, mask, spans)
 
 
 class _OnnxBackend:
@@ -58,14 +62,15 @@ class _OnnxBackend:
             options.intra_op_num_threads = threads
         self.session = ort.InferenceSession(str(directory/name), options, providers=["CPUExecutionProvider"])
         self.graph = name
+        self.shared_positions = bool(config.get("shared_option_positions"))
         tok = config["tokenizer"]
         self.tokenizer = _FastTokenizer(directory/"tokenizer.json", tok["cls_token_id"], tok["sep_token_id"],
                                         tok["pad_token_id"], tok["model_max_length"])
 
     def logits(self, packed):
-        input_ids, mask, spans = _batch_arrays(packed, self.tokenizer.pad_token_id)
-        out = self.session.run(["logits"], {"input_ids": input_ids, "attention_mask": mask,
-                                             "candidate_spans": spans})[0]
+        arrays = _batch_arrays(packed, self.tokenizer.pad_token_id, self.shared_positions)
+        feed = dict(zip(("input_ids", "attention_mask", "candidate_spans", "position_ids"), arrays))
+        out = self.session.run(["logits"], feed)[0]
         return [row[:len(p[1])].tolist() for row, p in zip(out, packed)]
 
 
@@ -81,7 +86,8 @@ class _TorchBackend:
         self.tokenizer = AutoTokenizer.from_pretrained(state["model_id"], **options)
         encoder = AutoModel.from_config(AutoConfig.from_pretrained(state["model_id"], **options))
         head = state["head_config"]
-        self.model = PackedChoiceModel(encoder, head["hidden_dim"], head["dropout"])
+        self.model = PackedChoiceModel(encoder, head["hidden_dim"], head["dropout"],
+                                       shared_option_positions=head.get("shared_option_positions", False))
         self.model.load_state_dict(state["state_dict"], strict=True)
         self.model.to(device).eval()
         self.device, self.torch = torch.device(device), torch
@@ -90,10 +96,13 @@ class _TorchBackend:
 
     def logits(self, packed):
         torch = self.torch
-        input_ids, mask, spans = (torch.from_numpy(a).to(self.device)
-                                  for a in _batch_arrays(packed, self.tokenizer.pad_token_id))
+        shared = self.model.shared_option_positions
+        arrays = [torch.from_numpy(a).to(self.device)
+                  for a in _batch_arrays(packed, self.tokenizer.pad_token_id, shared)]
+        input_ids, mask, spans = arrays[:3]
+        extra = {"position_ids": arrays[3]} if shared else {}
         with torch.inference_mode():
-            tokens = self.model.encoder(input_ids=input_ids, attention_mask=mask).last_hidden_state
+            tokens = self.model.encode(input_ids, mask, extra.get("position_ids"))
             out = self.model.head(tokens, spans.bool()).float().cpu().tolist()
         return [row[:len(p[1])] for row, p in zip(out, packed)]
 

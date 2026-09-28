@@ -28,6 +28,10 @@ RECIPES = [
      "args": ["--encoder-lr", "5e-5", "--head-lr", "3e-4", *V4]},
     {"name": "v4-full", "model": "jhu-clsp/ettin-encoder-68m", "epochs": 8,
      "args": ["--encoder-lr", "5e-5", "--head-lr", "3e-4", *V4, "--consistency-weight", "0.5"]},
+    # Options share position IDs, so the model cannot see their order at all (exact invariance,
+    # tested); the consistency term would be zero, so it is left out.
+    {"name": "v4-shared", "model": "jhu-clsp/ettin-encoder-68m", "epochs": 8,
+     "args": ["--encoder-lr", "5e-5", "--head-lr", "3e-4", *V4, "--shared-option-positions"]},
     # Twice the size, still CPU-servable; enable when there is GPU time left.
     {"name": "v4-full-150m", "model": "jhu-clsp/ettin-encoder-150m", "epochs": 8, "optional": True,
      "args": ["--encoder-lr", "4e-5", "--head-lr", "3e-4", *V4, "--consistency-weight", "0.5"]},

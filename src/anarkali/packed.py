@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 from .neural import HeadOutput
-from .packing import pack_row  # noqa: F401  (re-exported)
+from .packing import pack_row, shared_option_positions  # noqa: F401  (pack_row re-exported)
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class PackedHeadConfig:
     hidden_dim: int = 128
     dropout: float = 0.1
     architecture: str = 'packed'
+    shared_option_positions: bool = False
 
 
 class PackedHead(nn.Module):
@@ -32,13 +33,56 @@ class PackedHead(nn.Module):
         return self.scorer(pooled).squeeze(-1)
 
 
+def _dict_masks_supported(encoder):
+    """ModernBERT in transformers 5 accepts one attention mask per layer type."""
+    if getattr(encoder.config, 'model_type', None) != 'modernbert':
+        return False
+    import transformers
+    return int(transformers.__version__.split('.')[0]) >= 5
+
+
+def position_window_masks(encoder, attention_mask, position_ids, dtype):
+    """Additive masks per ModernBERT layer type, with the local window measured in position IDs.
+
+    ModernBERT's own sliding window uses token index, which would let local layers see option
+    order even when options share positions. Measuring the window in position IDs instead makes
+    every layer order-blind: tokens of different options at the same position are symmetric.
+    """
+    config = encoder.config
+    half = getattr(config, 'sliding_window', None) or config.local_attention // 2
+    valid = attention_mask.bool()
+    both = valid[:, None, :, None] & valid[:, None, None, :]
+    near = (position_ids[:, :, None] - position_ids[:, None, :]).abs() <= half
+    blocked = torch.finfo(dtype).min
+
+    def additive(allowed):
+        return torch.zeros(allowed.shape, dtype=dtype, device=allowed.device).masked_fill(~allowed, blocked)
+    return {'full_attention': additive(both), 'sliding_attention': additive(both & near[:, None])}
+
+
 class PackedChoiceModel(nn.Module):
-    def __init__(self, encoder, hidden_dim=128, dropout=0.1):
+    def __init__(self, encoder, hidden_dim=128, dropout=0.1, shared_option_positions=False):
         super().__init__()
         self.encoder = encoder
-        self.head = PackedHead(PackedHeadConfig(encoder.config.hidden_size, hidden_dim, dropout))
+        self.head = PackedHead(PackedHeadConfig(encoder.config.hidden_size, hidden_dim, dropout,
+                                                shared_option_positions=shared_option_positions))
 
-    def forward(self, input_ids, attention_mask, candidate_spans):
+    @property
+    def shared_option_positions(self):
+        return self.head.config.shared_option_positions
+
+    def encode(self, input_ids, attention_mask, position_ids=None):
+        """Token states; with shared positions, ModernBERT also gets position-measured local windows."""
+        if position_ids is None:
+            return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long()).last_hidden_state
+        if _dict_masks_supported(self.encoder):
+            dtype = self.encoder.embeddings.tok_embeddings.weight.dtype
+            masks = position_window_masks(self.encoder, attention_mask, position_ids, dtype)
+            return self.encoder(input_ids=input_ids, attention_mask=masks, position_ids=position_ids).last_hidden_state
+        return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long(),
+                            position_ids=position_ids).last_hidden_state
+
+    def forward(self, input_ids, attention_mask, candidate_spans, position_ids=None):
         if input_ids.ndim != 2 or input_ids.dtype != torch.long:
             raise ValueError('packed IDs must be int64 [batch, tokens]')
         if attention_mask.dtype != torch.bool or attention_mask.shape != input_ids.shape:
@@ -52,23 +96,29 @@ class PackedChoiceModel(nn.Module):
             raise ValueError('at least two candidates required')
         if (candidate_spans & ~attention_mask[:, None]).any().item():
             raise ValueError('candidate span includes padding')
-        tokens = self.encoder(input_ids=input_ids, attention_mask=attention_mask.long()).last_hidden_state
+        if self.shared_option_positions and position_ids is None:
+            raise ValueError('this model was trained with shared option positions; pass position_ids')
+        tokens = self.encode(input_ids, attention_mask, position_ids)
         logits = self.head(tokens, candidate_spans).masked_fill(~valid, float('-inf'))
         return HeadOutput(logits, logits.new_zeros(input_ids.shape[0]), valid)
 
 
-def collate_packed(rows, tokenizer, max_tokens=512):
+def collate_packed(rows, tokenizer, max_tokens=512, shared_positions=False):
+    """(ids, mask, spans, targets), or (ids, mask, spans, position_ids, targets) with shared positions."""
     if not rows:
         raise ValueError('empty batch')
     packed = [pack_row(r, tokenizer, max_tokens) for r in rows]
     width, k = max(len(x[0]) for x in packed), max(len(x[1]) for x in packed)
     ids = torch.full((len(rows), width), tokenizer.pad_token_id, dtype=torch.long)
+    positions = torch.zeros((len(rows), width), dtype=torch.long)
     mask = torch.zeros_like(ids, dtype=torch.bool)
     spans = torch.zeros((len(rows), k, width), dtype=torch.bool)
     targets = torch.zeros((len(rows), k), dtype=torch.float32)
     for i, (row, (tokens, ranges, _)) in enumerate(zip(rows, packed)):
         ids[i, :len(tokens)] = torch.tensor(tokens)
         mask[i, :len(tokens)] = True
+        if shared_positions:
+            positions[i, :len(tokens)] = torch.tensor(shared_option_positions(len(tokens), ranges))
         for j, (start, end) in enumerate(ranges):
             spans[i, j, start:end] = True
         target = torch.tensor(row['target'], dtype=torch.float32)
@@ -76,7 +126,7 @@ def collate_packed(rows, tokenizer, max_tokens=512):
                 or (target < 0).any() or not torch.isclose(target.sum(), torch.tensor(1.0), atol=1e-5)):
             raise ValueError('invalid candidate targets')
         targets[i, :len(ranges)] = target
-    return ids, mask, spans, targets
+    return (ids, mask, spans, positions, targets) if shared_positions else (ids, mask, spans, targets)
 
 
 def shuffle_candidates(rows, rng):

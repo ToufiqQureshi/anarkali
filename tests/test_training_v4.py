@@ -59,29 +59,33 @@ class TrainingV4Tests(unittest.TestCase):
                 path.write_text("".join(json.dumps(row(split + str(i), i)) + "\n" for i in range(6)), encoding="utf-8")
                 manifest["split_counts"][split] = {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
             (data / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            output = Path(tmp) / "v4"
-            argv = ["train", "--data", str(data), "--output", str(output), "--architecture", "packed",
-                    "--epochs", "2", "--batch-size", "3", "--device", "cpu", "--packed-max-tokens", "64",
-                    "--brier-weight", "0.5", "--rps-weight", "0.5", "--consistency-weight", "1.0",
-                    "--weight-field", "teacher_agreement", "--llrd", "0.8", "--warmup-ratio", "0.25",
-                    "--schedule", "cosine", "--ema-decay", "0.9"]
-            with (patch.object(sys, "argv", argv),
-                  patch("huggingface_hub.HfApi.model_info", return_value=SimpleNamespace(sha="fixture")),
-                  patch("transformers.AutoTokenizer.from_pretrained", return_value=tokenizer),
-                  patch("transformers.AutoModel.from_pretrained", side_effect=tiny_encoder),
-                  contextlib.redirect_stdout(io.StringIO())):
-                trainer.main()
-            history = json.loads((output / "training.json").read_text())
-            config = history["run_config"]
-            self.assertEqual((config["rps_weight"], config["consistency_weight"], config["schedule"]),
-                             (0.5, 1.0, "cosine"))
-            self.assertEqual(len(history["history"]), 2)
-            for epoch in history["history"]:
-                self.assertTrue(all(isinstance(v, (int, float)) for k, v in epoch.items()))
-                self.assertLess(epoch["train_loss"], 1e6)
-            checkpoint = torch.load(output / "best.pt", map_location="cpu", weights_only=False)
-            self.assertTrue(all(torch.isfinite(v).all() for v in checkpoint["state_dict"].values()
-                                if v.dtype.is_floating_point))
+            for variant, extra in (("v4", []), ("v4-shared", ["--shared-option-positions"])):
+                self.run_variant(trainer, tokenizer, tiny_encoder, data, Path(tmp) / variant, extra, torch)
+
+    def run_variant(self, trainer, tokenizer, tiny_encoder, data, output, extra, torch):
+        argv = ["train", "--data", str(data), "--output", str(output), "--architecture", "packed",
+                "--epochs", "2", "--batch-size", "3", "--device", "cpu", "--packed-max-tokens", "64",
+                "--brier-weight", "0.5", "--rps-weight", "0.5", "--consistency-weight", "1.0",
+                "--weight-field", "teacher_agreement", "--llrd", "0.8", "--warmup-ratio", "0.25",
+                "--schedule", "cosine", "--ema-decay", "0.9", *extra]
+        with (patch.object(sys, "argv", argv),
+              patch("huggingface_hub.HfApi.model_info", return_value=SimpleNamespace(sha="fixture")),
+              patch("transformers.AutoTokenizer.from_pretrained", return_value=tokenizer),
+              patch("transformers.AutoModel.from_pretrained", side_effect=tiny_encoder),
+              contextlib.redirect_stdout(io.StringIO())):
+            trainer.main()
+        history = json.loads((output / "training.json").read_text())
+        config = history["run_config"]
+        self.assertEqual((config["rps_weight"], config["consistency_weight"], config["schedule"]),
+                         (0.5, 1.0, "cosine"))
+        self.assertEqual(len(history["history"]), 2)
+        for epoch in history["history"]:
+            self.assertTrue(all(isinstance(v, (int, float)) for k, v in epoch.items()))
+            self.assertLess(epoch["train_loss"], 1e6)
+        checkpoint = torch.load(output / "best.pt", map_location="cpu", weights_only=False)
+        self.assertTrue(all(torch.isfinite(v).all() for v in checkpoint["state_dict"].values()
+                            if v.dtype.is_floating_point))
+        self.assertEqual(checkpoint["head_config"]["shared_option_positions"], bool(extra))
 
 
 if __name__ == "__main__":

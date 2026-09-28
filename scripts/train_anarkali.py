@@ -89,6 +89,8 @@ def main():
     parser.add_argument("--llrd", type=float, default=1.0, help="layer-wise learning-rate decay per encoder layer")
     parser.add_argument("--warmup-ratio", type=float, default=0.0)
     parser.add_argument("--schedule", choices=("constant", "linear", "cosine"), default="constant")
+    parser.add_argument("--shared-option-positions", action="store_true",
+                        help="start every option at the same position ID, so full-attention layers cannot see option order")
     parser.add_argument("--ema-decay", type=float, default=0.0,
                         help="evaluate and save an exponential moving average of the weights (e.g. 0.999)")
     args = parser.parse_args()
@@ -108,6 +110,8 @@ def main():
     if not 0 < args.llrd <= 1 or not 0 <= args.ema_decay < 1:
         raise ValueError("llrd must be in (0, 1] and ema-decay in [0, 1)")
     use_objectives = bool(args.brier_weight or args.rps_weight or args.consistency_weight or args.weight_field)
+    if args.shared_option_positions and args.architecture != "packed":
+        raise ValueError("--shared-option-positions needs --architecture packed")
     if use_objectives and args.architecture != "packed":
         raise ValueError("--brier/--rps/--consistency/--weight-field need --architecture packed")
 
@@ -159,13 +163,14 @@ def main():
     if args.architecture == "packed":
         if args.packed_max_tokens > encoder.config.max_position_embeddings:
             raise ValueError("packed budget exceeds encoder position limit")
-        model = PackedChoiceModel(encoder).to(device)
+        model = PackedChoiceModel(encoder, shared_option_positions=args.shared_option_positions).to(device)
     elif args.architecture == "joint":
         model = JointChoiceModel(encoder).to(device)
     else:
         model = EncoderChoiceModel(encoder, HeadConfig(encoder_dim=encoder.config.hidden_size)).to(device)
     def make_batch(rows):
-        values = (collate_packed(rows, tokenizer, args.packed_max_tokens) if args.architecture == "packed"
+        values = (collate_packed(rows, tokenizer, args.packed_max_tokens, args.shared_option_positions)
+                  if args.architecture == "packed"
                   else collate_joint(rows, tokenizer, args.joint_max_tokens) if args.architecture == "joint"
                   else collate(rows, tokenizer, torch, args.max_state_tokens,
                                args.max_question_tokens, args.max_candidate_tokens))

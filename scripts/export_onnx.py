@@ -75,30 +75,37 @@ def main():
     shutil.copy(args.output / "hf-tokenizer" / "tokenizer.json", args.output / "tokenizer.json")
     shutil.rmtree(args.output / "hf-tokenizer")
 
+    shared = backend.model.shared_option_positions
+
     class Graph(torch.nn.Module):
         def __init__(self, model):
             super().__init__()
             self.model = model
 
-        def forward(self, input_ids, attention_mask, candidate_spans):
-            tokens = self.model.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+        def forward(self, input_ids, attention_mask, candidate_spans, position_ids=None):
+            tokens = self.model.encode(input_ids, attention_mask, position_ids)
             return self.model.head(tokens, candidate_spans)
 
     rows = load_rows(args.data / "development.jsonl", args.parity_rows)
-    example = _batch_arrays([pack_row(r, tokenizer, reference.max_tokens) for r in rows[:2]], tokenizer.pad_token_id)
+    example = _batch_arrays([pack_row(r, tokenizer, reference.max_tokens) for r in rows[:2]],
+                            tokenizer.pad_token_id, shared)
+    names = ["input_ids", "attention_mask", "candidate_spans"] + (["position_ids"] if shared else [])
+    axes = {
+        "input_ids": {0: "batch", 1: "tokens"},
+        "attention_mask": {0: "batch", 1: "tokens"},
+        "candidate_spans": {0: "batch", 1: "options", 2: "tokens"},
+        "logits": {0: "batch", 1: "options"},
+    }
+    if shared:
+        axes["position_ids"] = {0: "batch", 1: "tokens"}
     fp32 = args.output / "model.onnx"
     torch.onnx.export(
         Graph(backend.model).eval(),
         tuple(torch.from_numpy(a) for a in example),
         str(fp32),
-        input_names=["input_ids", "attention_mask", "candidate_spans"],
+        input_names=names,
         output_names=["logits"],
-        dynamic_axes={
-            "input_ids": {0: "batch", 1: "tokens"},
-            "attention_mask": {0: "batch", 1: "tokens"},
-            "candidate_spans": {0: "batch", 1: "options", 2: "tokens"},
-            "logits": {0: "batch", 1: "options"},
-        },
+        dynamic_axes=axes,
         opset_version=17,
         dynamo=False,
     )
@@ -111,6 +118,7 @@ def main():
         "abstain_below": args.abstain_below,
         **({"temperature_by_type": args.temperature_by_type} if args.temperature_by_type else {}),
         **({"orders": args.orders} if args.orders != 1 else {}),
+        **({"shared_option_positions": True} if shared else {}),
         "question_types": ["choice", "noul", "score"],
         "tokenizer": {
             "cls_token_id": tokenizer.cls_token_id,

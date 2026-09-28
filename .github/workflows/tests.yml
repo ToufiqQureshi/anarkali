@@ -39,7 +39,7 @@ jobs:
       - name: Install CPU torch and all extras
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[encoder,serve]" httpx
+          pip install -e ".[encoder,serve]" httpx onnx
       - name: Cache released model
         uses: actions/cache@v4
         with:

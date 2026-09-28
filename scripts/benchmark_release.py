@@ -62,7 +62,7 @@ def fit_temperatures(rows: list[dict], probs: list[list[float]]) -> dict[str, fl
 
 
 def metrics(rows: list[dict], probs: list[list[float]]) -> dict[str, dict]:
-    groups = defaultdict(lambda: {"n": 0, "correct": 0, "ce": 0.0, "brier": 0.0, "conf": [], "hit": []})
+    groups = defaultdict(lambda: {"n": 0, "correct": 0, "ce": 0.0, "kl": 0.0, "brier": 0.0, "conf": [], "hit": []})
     for row, p in zip(rows, probs):
         pred = max(range(len(p)), key=p.__getitem__)
         gold = max(range(len(row["target"])), key=row["target"].__getitem__)
@@ -71,6 +71,8 @@ def metrics(rows: list[dict], probs: list[list[float]]) -> dict[str, dict]:
             g["n"] += 1
             g["correct"] += pred == gold
             g["ce"] += soft_ce(p, row["target"])
+            # KL(gold || predicted): soft CE minus the gold distribution's entropy, as the leaderboard reports
+            g["kl"] += soft_ce(p, row["target"]) + sum(t * math.log(t) for t in row["target"] if t > 0)
             g["brier"] += sum((q - (i == gold)) ** 2 for i, q in enumerate(p))
             g["conf"].append(p[pred])
             g["hit"].append(pred == gold)
@@ -87,7 +89,8 @@ def metrics(rows: list[dict], probs: list[list[float]]) -> dict[str, dict]:
             selective[str(threshold)] = {"coverage": len(kept) / g["n"],
                                          "accuracy": sum(kept) / len(kept) if kept else None}
         out[key] = {"decisions": g["n"], "accuracy": g["correct"] / g["n"], "ece_15_bins": ece,
-                    "brier": g["brier"] / g["n"], "soft_ce": g["ce"] / g["n"], "selective": selective}
+                    "brier": g["brier"] / g["n"], "soft_ce": g["ce"] / g["n"], "kl_from_gold": g["kl"] / g["n"],
+                    "selective": selective}
     return out
 
 
@@ -119,14 +122,15 @@ def truncated_share(engine, rows: list[dict]) -> float:
 def markdown(report: dict) -> str:
     if not report["variants"]:
         return "No variant finished: " + json.dumps(report.get("failed_variants", {})) + "\n"
-    lines = ["| Variant | Accuracy | ECE raw | ECE calibrated | Brier cal. | p≥0.7 coverage / acc. | State cut | ms / decision |",
-             "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    lines = ["| Variant | Accuracy | KL from gold (cal.) | ECE raw | ECE calibrated | Brier cal. | p≥0.7 coverage / acc. "
+             "| State cut | ms / decision |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for name, v in report["variants"].items():
         raw, cal = v["test_raw"]["all"], v["test_calibrated"]["all"]
         sel = cal["selective"]["0.7"]
         acc = "–" if sel["accuracy"] is None else f"{sel['accuracy']:.1%}"
-        lines.append(f"| `{name}` | {raw['accuracy']:.1%} | {raw['ece_15_bins']:.3f} | {cal['ece_15_bins']:.3f} | "
-                     f"{cal['brier']:.3f} | {sel['coverage']:.0%} / {acc} | {v['state_truncated_share']:.1%} | "
+        lines.append(f"| `{name}` | {raw['accuracy']:.1%} | {cal['kl_from_gold']:.3f} | {raw['ece_15_bins']:.3f} | "
+                     f"{cal['ece_15_bins']:.3f} | {cal['brier']:.3f} | {sel['coverage']:.0%} / {acc} | {v['state_truncated_share']:.1%} | "
                      f"{v['test_ms_per_decision']:.0f} |")
     first = next(iter(report["variants"].values()))
     lines += ["", "Per question type, first variant, calibrated:", "",

@@ -37,3 +37,20 @@ rather than turning a state-dependent decision into an option-only prediction.
         ids.append(tokenizer.sep_token_id)
     return ids, spans, {'input_tokens':len(ids), 'state_tokens':original_length,
                         'state_tokens_dropped':original_length-len(state)}
+
+
+def shared_option_positions(length, spans):
+    """Position IDs that start every option at the same position.
+
+    The prefix (CLS, question, SEP, state, SEP) keeps 0..P-1; each option's tokens get P, P+1, ...
+    and the SEP after it the next one. Under full attention the encoder then cannot tell the
+    options' order, so the scores are order-invariant by construction. Layers with index-based
+    local attention (ModernBERT's sliding window) still see the order, only less of it.
+    """
+    prefix = spans[0][0]
+    positions = list(range(prefix))
+    for start, end in spans:
+        positions.extend(range(prefix, prefix + end - start + 1))
+    if len(positions) != length:
+        raise ValueError('spans must cover every token after the prefix, one SEP after each option')
+    return positions

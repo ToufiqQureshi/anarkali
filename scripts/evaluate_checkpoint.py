@@ -126,7 +126,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision, cache_dir=str(args.cache))
     encoder = AutoModel.from_config(AutoConfig.from_pretrained(model_id, revision=revision, cache_dir=str(args.cache)))
     head = checkpoint['head_config']
-    model = PackedChoiceModel(encoder, hidden_dim=head['hidden_dim'], dropout=head['dropout'])
+    shared = head.get('shared_option_positions', False)
+    model = PackedChoiceModel(encoder, hidden_dim=head['hidden_dim'], dropout=head['dropout'],
+                              shared_option_positions=shared)
     model.load_state_dict(checkpoint['state_dict'], strict=True)
     model.to(device).eval()
     max_tokens = config.get('packed_max_tokens', 512)
@@ -136,7 +138,7 @@ def main():
         with torch.inference_mode():
             for start in range(0, len(rows), args.batch_size):
                 part = rows[start:start+args.batch_size]
-                values = tuple(v.to(device) for v in collate_packed(part, tokenizer, max_tokens))
+                values = tuple(v.to(device) for v in collate_packed(part, tokenizer, max_tokens, shared))
                 logits = model(*values[:-1]).logits.float().cpu().tolist()
                 for row, row_logits in zip(part, logits):
                     n = len(row['candidates'])
@@ -163,10 +165,10 @@ def main():
     with torch.inference_mode():
         sample = test[:args.latency_samples]
         for row in sample[:10]:
-            model(*tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens))[:-1])
+            model(*tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens, shared))[:-1])
         for row in sample:
             started = time.perf_counter()
-            values = tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens))
+            values = tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens, shared))
             model(*values[:-1]).logits.cpu()  # copy back so GPU timing includes the kernels
             latencies.append((time.perf_counter() - started) * 1000)
     latencies.sort()
