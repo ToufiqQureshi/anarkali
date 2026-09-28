@@ -5,8 +5,11 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-import torch
-from torch import nn
+try:
+    import torch
+    from torch import nn
+except ImportError:
+    raise unittest.SkipTest("torch not installed (pip install '.[neural]')")
 from anarkali.neural import ChoiceHead, HeadConfig, training_loss
 from anarkali.encoder import EncoderChoiceModel
 from anarkali.smoke import run_smoke

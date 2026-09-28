@@ -8,3 +8,4 @@ dist/
 artifacts/
 checkpoints/
 .env
+.model/

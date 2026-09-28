@@ -1,7 +1,10 @@
 import random
 import unittest
-import torch
-from transformers import BertConfig, BertModel
+try:
+    import torch
+    from transformers import BertConfig, BertModel
+except ImportError:
+    raise unittest.SkipTest("torch/transformers not installed (pip install '.[encoder]')")
 from anarkali.packed import PackedChoiceModel, collate_packed, pack_row, shuffle_candidates
 from anarkali.neural import training_loss
 

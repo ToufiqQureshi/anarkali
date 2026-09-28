@@ -3,8 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-import torch
-from torch import nn
+try:
+    import torch
+    from torch import nn
+except ImportError:
+    raise unittest.SkipTest("torch not installed (pip install '.[neural]')")
 from anarkali.joint import JointChoiceModel
 from anarkali.neural import training_loss
 
