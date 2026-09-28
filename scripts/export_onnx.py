@@ -43,6 +43,9 @@ def main():
     parser.add_argument("--name", default="anarkali-lite")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--abstain-below", type=float)
+    parser.add_argument("--temperature-by-type", type=json.loads, default=None,
+                        help='per-type temperatures fitted on held-out data, e.g. \'{"choice": 1.2, "noul": 0.9}\'')
+    parser.add_argument("--orders", type=int, default=1, help="default option orders the engine averages over")
     parser.add_argument("--max-int8-drift", type=float, default=0.02)
     parser.add_argument("--parity-rows", type=int, default=200)
     parser.add_argument("--latency-samples", type=int, default=100)
@@ -106,6 +109,8 @@ def main():
         "max_tokens": reference.max_tokens,
         "temperature": args.temperature,
         "abstain_below": args.abstain_below,
+        **({"temperature_by_type": args.temperature_by_type} if args.temperature_by_type else {}),
+        **({"orders": args.orders} if args.orders != 1 else {}),
         "question_types": ["choice", "noul", "score"],
         "tokenizer": {
             "cls_token_id": tokenizer.cls_token_id,

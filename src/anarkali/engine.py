@@ -108,27 +108,88 @@ def _resolve(path: str | Path, cache_dir: str | None) -> Path:
                                   allow_patterns=["anarkali.json", "tokenizer.json", "model*.onnx"]))
 
 
+def option_orders(count: int, orders: int) -> list[int]:
+    """Cyclic offsets spread evenly over the options, so each option visits different positions."""
+    if orders < 1:
+        raise ValueError("orders must be at least 1")
+    offsets = []
+    for i in range(min(orders, count)):
+        offset = (i * count) // min(orders, count)
+        if offset not in offsets:
+            offsets.append(offset)
+    return offsets
+
+
 class Engine:
-    """Typed decisions (choice / noul / score) over one state, Jev `/v1/systemone` shaped."""
+    """Typed decisions (choice / noul / score) over one state, Jev `/v1/systemone` shaped.
+
+    `orders` > 1 scores every question under that many cyclic option orders and averages
+    the probabilities. The packed encoder sees options at absolute positions, so this
+    removes most position bias at `orders` times the compute. `temperature_by_type`
+    holds per-question-type temperatures fitted on held-out data.
+    """
+
+    BATCH = 32
 
     def __init__(self, backend, *, name: str, max_tokens: int, temperature: float = 1.0,
-                 abstain_below: float | None = None):
+                 abstain_below: float | None = None, orders: int = 1,
+                 temperature_by_type: dict[str, float] | None = None):
         self.backend, self.name = backend, name
         self.max_tokens, self.temperature, self.abstain_below = max_tokens, temperature, abstain_below
+        self.orders = orders
+        self.temperature_by_type = dict(temperature_by_type or {})
+        option_orders(2, orders)
+        for kind, value in self.temperature_by_type.items():
+            softmax([0.0, 1.0], value)  # validates
 
     @classmethod
     def load(cls, path: str | Path, *, graph: str | None = None, threads: int | None = None,
-             cache_dir: str | None = None, device: str = "cpu") -> "Engine":
+             cache_dir: str | None = None, device: str = "cpu", orders: int | None = None,
+             max_tokens: int | None = None) -> "Engine":
         path = _resolve(path, cache_dir)
         if path.is_file() and path.suffix == ".pt":
             backend = _TorchBackend(path, cache_dir, device)
-            return cls(backend, name=f"anarkali:{path.parent.name}", max_tokens=backend.meta["max_tokens"])
+            return cls(backend, name=f"anarkali:{path.parent.name}",
+                       max_tokens=max_tokens or backend.meta["max_tokens"], orders=orders or 1)
         config = json.loads((path/"anarkali.json").read_text(encoding="utf-8"))
         backend = _OnnxBackend(path, config, graph, threads)
-        return cls(backend, name=config.get("name", "anarkali"), max_tokens=config["max_tokens"],
-                   temperature=config.get("temperature", 1.0), abstain_below=config.get("abstain_below"))
+        return cls(backend, name=config.get("name", "anarkali"), max_tokens=max_tokens or config["max_tokens"],
+                   temperature=config.get("temperature", 1.0), abstain_below=config.get("abstain_below"),
+                   orders=orders or config.get("orders", 1),
+                   temperature_by_type=config.get("temperature_by_type"))
 
-    def predict(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def score(self, items: list[tuple[str, Any, str, list[dict[str, str]]]], *,
+              orders: int | None = None) -> tuple[list[list[float]], int]:
+        """Probabilities for (kind, state, packed question text, candidates) items, in candidate order.
+
+        Returns the probability lists and the number of input tokens encoded.
+        """
+        orders = self.orders if orders is None else orders
+        jobs, packed = [], []
+        for index, (kind, state, text, candidates) in enumerate(items):
+            k = len(candidates)
+            for offset in option_orders(k, orders):
+                rotated = [candidates[(p + offset) % k] for p in range(k)]
+                packed.append(pack_row({"state": state, "question": text, "candidates": rotated},
+                                       self.backend.tokenizer, self.max_tokens))
+                jobs.append((index, offset))
+        logits = []
+        for start in range(0, len(packed), self.BATCH):
+            logits.extend(self.backend.logits(packed[start:start + self.BATCH]))
+        sums = [[0.0] * len(c) for _, _, _, c in items]
+        counts = [0] * len(items)
+        for (index, offset), row_logits in zip(jobs, logits):
+            kind = items[index][0]
+            probabilities = softmax(row_logits, self.temperature_by_type.get(kind, self.temperature))
+            k = len(probabilities)
+            for p, value in enumerate(probabilities):
+                sums[index][(p + offset) % k] += value
+            counts[index] += 1
+        tokens = sum(p[2]["input_tokens"] for p in packed)
+        return [[value / n for value in row] for row, n in zip(sums, counts)], tokens
+
+    def predict(self, state: Any, questions: dict[str, dict[str, Any]], *,
+                orders: int | None = None) -> dict[str, Any]:
         if not isinstance(questions, dict) or not questions:
             raise ValueError("'questions' must be a non-empty object")
         if len(questions) > MAX_QUESTIONS:
@@ -136,23 +197,23 @@ class Engine:
         if len(state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)) > MAX_STATE_CHARS:
             raise ValueError(f"state longer than {MAX_STATE_CHARS} characters")
         started = time.perf_counter()
-        parsed, packed = [], []
+        parsed, items = [], []
         for qid, question in questions.items():
             try:
                 kind, text, candidates = question_candidates(question)
-                packed.append(pack_row({"state": state, "question": text, "candidates": candidates},
-                                       self.backend.tokenizer, self.max_tokens))
+                # pack once up front so a bad question is reported by name
+                pack_row({"state": state, "question": text, "candidates": candidates},
+                         self.backend.tokenizer, self.max_tokens)
             except ValueError as exc:
                 raise ValueError(f"question {qid!r}: {exc}") from None
             parsed.append((qid, kind, candidates))
-        answers = {}
-        for (qid, kind, candidates), logits in zip(parsed, self.backend.logits(packed)):
-            probabilities = softmax(logits, self.temperature)
-            answers[qid] = format_answer(kind, candidates, probabilities, self.abstain_below)
-        tokens = sum(p[2]["input_tokens"] for p in packed)
+            items.append((kind, state, text, candidates))
+        probabilities, tokens = self.score(items, orders=orders)
+        answers = {qid: format_answer(kind, candidates, probs, self.abstain_below)
+                   for (qid, kind, candidates), probs in zip(parsed, probabilities)}
         return {"model": self.name, "answers": answers,
                 "usage": {"input_tokens": tokens, "output_tokens": 0},
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2)}
 
 
-__all__ = ["Engine", "MAX_OPTIONS"]
+__all__ = ["Engine", "MAX_OPTIONS", "option_orders"]

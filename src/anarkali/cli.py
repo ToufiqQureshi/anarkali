@@ -10,10 +10,12 @@ def main(argv=None) -> int:
     decide = sub.add_parser("decide", help="run a Jev-shaped request against a released model")
     decide.add_argument("--model", required=True)
     decide.add_argument("--request", required=True)
+    decide.add_argument("--orders", type=int, help="average over this many option orders (slower, less position bias)")
     serve = sub.add_parser("serve", help="serve the Jev-compatible HTTP API")
     serve.add_argument("--model", required=True)
     serve.add_argument("--port", type=int)
     serve.add_argument("--threads", type=int)
+    serve.add_argument("--orders", type=int, help="average over this many option orders; env ANARKALI_ORDERS")
     smoke = sub.add_parser("smoke", help="test neural mechanics without downloading a model")
     smoke.add_argument("--out")
     validate = sub.add_parser("validate-request", help="validate a choice request JSON file")
@@ -29,10 +31,10 @@ def main(argv=None) -> int:
             payload = json.loads(Path(args.request).read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("request must be a JSON object")
-            result = Engine.load(args.model).predict(payload.get("state"), payload.get("questions"))
+            result = Engine.load(args.model, orders=args.orders).predict(payload.get("state"), payload.get("questions"))
         elif args.command == "serve":
             from .server import serve as run_server
-            run_server(model_path=args.model, port=args.port, threads=args.threads)
+            run_server(model_path=args.model, port=args.port, threads=args.threads, orders=args.orders)
             return 0
         elif args.command == "smoke":
             from .smoke import run_smoke
