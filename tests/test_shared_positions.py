@@ -96,6 +96,18 @@ class InvarianceTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(together[0, :2]).all() and torch.isfinite(together[1]).all())
         self.assertLess(float((together[0, :2] - alone[0]).abs().max()), 1e-4)
 
+    def test_half_precision_stays_finite_on_padding(self):
+        # fp16 is what the notebooks train in; the additive mask must not create -inf rows
+        torch.manual_seed(0)
+        encoder = ModernBertModel(ModernBertConfig(
+            vocab_size=24, hidden_size=32, intermediate_size=48, num_hidden_layers=3, num_attention_heads=4,
+            global_attn_every_n_layers=3, local_attention=8, max_position_embeddings=128,
+            pad_token_id=0, cls_token_id=1, sep_token_id=2, bos_token_id=1, eos_token_id=2))
+        model = PackedChoiceModel(encoder, dropout=0, shared_option_positions=True).half().eval()
+        ids, mask, _spans, positions, _ = collate_packed([row(["a", "bb"]), row(["ccc", "d", "e"])], Tokenizer(), 96, True)
+        with torch.no_grad():
+            self.assertTrue(torch.isfinite(model.encode(ids, mask, positions)).all())
+
     def test_missing_positions_are_refused(self):
         encoder = BertModel(BertConfig(vocab_size=24, hidden_size=16, num_hidden_layers=1, num_attention_heads=4,
                                        intermediate_size=32, max_position_embeddings=128))

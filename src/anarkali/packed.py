@@ -53,7 +53,9 @@ def position_window_masks(encoder, attention_mask, position_ids, dtype):
     valid = attention_mask.bool()
     both = valid[:, None, :, None] & valid[:, None, None, :]
     near = (position_ids[:, :, None] - position_ids[:, None, :]).abs() <= half
-    blocked = torch.finfo(dtype).min
+    # -1e4, not finfo.min: it stays finite in fp16, so padded rows get a uniform softmax
+    # instead of NaN, and exp(-1e4) is still exactly zero for every real key.
+    blocked = -1e4
 
     def additive(allowed):
         return torch.zeros(allowed.shape, dtype=dtype, device=allowed.device).masked_fill(~allowed, blocked)
@@ -77,6 +79,9 @@ class PackedChoiceModel(nn.Module):
             return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long()).last_hidden_state
         if _dict_masks_supported(self.encoder):
             dtype = self.encoder.embeddings.tok_embeddings.weight.dtype
+            device_type = input_ids.device.type
+            if torch.is_autocast_enabled(device_type):
+                dtype = torch.get_autocast_dtype(device_type)
             masks = position_window_masks(self.encoder, attention_mask, position_ids, dtype)
             return self.encoder(input_ids=input_ids, attention_mask=masks, position_ids=position_ids).last_hidden_state
         return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long(),
