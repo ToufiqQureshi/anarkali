@@ -131,7 +131,15 @@ The packed encoder reads options at fixed positions, so reordering them can chan
 engine = Engine.load("toufiqqureshi651/anarkali", orders=3)   # or: anarkali serve --orders 3
 ```
 
-`anarkali.json` may also carry `temperature_by_type`: one temperature per question type, fitted on held-out data. `scripts/benchmark_release.py` fits them on the calibration split and measures every variant on the test split. The **Benchmark** workflow runs it on the released model.
+Measured on the typed-decisions test split, 2,000 decisions, CPU:
+
+| `orders` | Accuracy | ECE | ms per decision |
+|---:|---:|---:|---:|
+| 1 (default) | 74.0% | 0.134 | 103 |
+| 2 | 74.35% | 0.138 | 186 |
+| 3 | 74.55% | 0.141 | 244 |
+
+`anarkali.json` may also carry `temperature_by_type`: one temperature per question type, fitted on held-out data. For 0.3.0 the fitted values are 1.00 to 1.10 and do not improve test calibration, so the release ships without them. `scripts/benchmark_release.py` and the **Benchmark** workflow produce these numbers for any release.
 
 ## Coding decisions
 

@@ -35,8 +35,8 @@ Four things, all measured. We claim number one only where a number supports it.
 
 | Change | Where | What it buys | How to run |
 |---|---|---|---|
-| **Option-order averaging** at inference | `Engine(orders=N)`, `anarkali decide/serve --orders` | Removes position bias, the packed encoder's known weakness. 2.6% of answers flip when options are reversed. No retraining. | `Engine.load(path, orders=3)` |
-| **Per-type temperatures** | `anarkali.json: temperature_by_type`, `export_onnx.py --temperature-by-type` | The released model ships with temperature 1.0, uncalibrated. Fitting one temperature per question type on held-out data is the standard fix. | fitted by `benchmark_release.py` and `evaluate_checkpoint.py` |
+| **Option-order averaging** at inference | `Engine(orders=N)`, `anarkali decide/serve --orders` | Measured: 74.0% → 74.55% at `orders=3`, for 2.4× the latency. It is an opt-in accuracy mode, not the default. | `Engine.load(path, orders=3)` |
+| **Per-type temperatures** | `anarkali.json: temperature_by_type`, `export_onnx.py --temperature-by-type` | Support for recalibrating a release on held-out data. Measured tonight, 0.3.0 is already calibrated: the fitted temperatures are 1.00 to 1.10. The benchmark recommends temperatures only when they help. | fitted by `benchmark_release.py` and `evaluate_checkpoint.py` |
 | **Release benchmark in CI** | `scripts/benchmark_release.py`, `.github/workflows/benchmark.yml` | Real numbers on the real model for every inference change: accuracy, KL from gold, ECE, Brier, selective accuracy, truncation, latency. | Actions → Benchmark → Run |
 | **Training objectives** | `src/anarkali/objectives.py`, `train_anarkali.py` flags | Brier beside soft CE; ranked probability score for ordinal questions (our weakest type, 71.6%); permutation-consistency R-Drop; layer-wise LR decay; warmup and decay schedule; EMA weights; per-row weights from teacher agreement. All off by default. | `--brier-weight --rps-weight --consistency-weight --llrd --schedule --ema-decay --weight-field` |
 | **Shared option positions** (architecture) | `--shared-option-positions`, `PackedChoiceModel.encode` | Every option starts at the same position ID, and ModernBERT's local window is measured in positions. The encoder cannot see option order at all, at 1× compute. On an Ettin-shaped model, the score change under permutation drops from 9e-4 to 6e-8, and ONNX export keeps it. It must be trained, and it is a V4 recipe. | V4 notebook `v4-shared` |
@@ -50,11 +50,25 @@ Every piece has tests that run without a network or GPU. None of it has trained 
 
 ## 4. The plan, in order
 
-### Step 1: today, no GPU (about 1 hour)
+### Step 1: inference settings, measured (done tonight)
 
-- Read the Benchmark workflow's summary on this PR. It scores the released model with `orders=1/2/3` and with per-type temperatures fitted on the calibration split.
-- If `orders=2` or `orders=3` improves accuracy or ECE, set that as the release default: add `"orders": N` and the fitted `"temperature_by_type"` to `anarkali.json` on the Hugging Face repo. That is a config-only release, 0.3.1.
-- Update the README table with the new numbers. Report latency with `orders` included, honestly.
+The Benchmark workflow scored the released 0.3.0 model on the typed-decisions test split, 2,000 decisions:
+
+| Setting | Accuracy | ECE | KL from gold | p ≥ 0.7: coverage / accuracy | CPU ms per decision |
+|---|---:|---:|---:|---:|---:|
+| `orders=1` (released) | 74.0% | 0.134 | 0.122 | 24% / 95.1% | 103 |
+| `orders=2` | 74.35% | 0.138 | 0.120 | 23% / 95.3% | 186 |
+| `orders=3` | **74.55%** | 0.141 | 0.119 | 24% / 95.3% | 244 |
+| `orders=1`, 1,024 tokens | 74.0% | 0.134 | 0.122 | 24% / 95.1% | 99 |
+
+KL is after the per-type temperatures. Latency was measured on a GitHub Actions CPU runner.
+
+Decisions:
+
+- **Keep `orders=1` as the default.** Speed is the product. Offer **`orders=3` as an accuracy mode** (74.55%, +0.55 points) for batch or offline use, and quote its latency next to it.
+- **Do not ship `temperature_by_type`.** The fitted temperatures are 1.00 to 1.10, so the model is already calibrated. Applying them made test ECE slightly worse (0.134 → 0.145). The benchmark now recommends temperatures only when they improve both ECE and KL.
+- **A longer context changes nothing on this benchmark.** Only 0.1% of states are cut at 512 tokens.
+- **Where the headroom is:** `score` questions (71.6% accuracy, ECE 0.196) and the agent-trace workflow (69.6%). Order bias is worth only about half a point, so the next gains must come from the training objectives (RPS for `score`), the architecture (shared positions) and, above all, better and broader data. Those are steps 2 and 3.
 
 ### Step 2: this week, one free T4 (about 2 hours)
 

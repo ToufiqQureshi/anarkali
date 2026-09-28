@@ -156,10 +156,16 @@ def recommend(report: dict, tolerance: float = 0.002) -> dict | None:
     best = max(v["test_raw"]["all"]["accuracy"] for v in variants.values())
     close = [(name, v) for name, v in variants.items() if v["test_raw"]["all"]["accuracy"] >= best - tolerance]
     name, chosen = min(close, key=lambda item: (item[1]["orders"], item[1]["test_calibrated"]["all"]["kl_from_gold"]))
-    config = {"orders": chosen["orders"], "temperature_by_type": chosen["temperatures"]}
+    raw, cal = chosen["test_raw"]["all"], chosen["test_calibrated"]["all"]
+    # Fitted temperatures ship only when they help both calibration measures on held-out data;
+    # a model that is already calibrated gets noise from a 600-decision fit.
+    temperatures_help = cal["ece_15_bins"] < raw["ece_15_bins"] and cal["kl_from_gold"] < raw["kl_from_gold"]
+    config = {"orders": chosen["orders"]}
+    if temperatures_help:
+        config["temperature_by_type"] = chosen["temperatures"]
     if chosen["max_tokens"] != next(iter(variants.values()))["max_tokens"]:
         config["max_tokens"] = chosen["max_tokens"]
-    return {"variant": name, "anarkali_json": config,
+    return {"variant": name, "anarkali_json": config, "temperatures_help": temperatures_help,
             "accuracy": chosen["test_raw"]["all"]["accuracy"],
             "kl_from_gold_calibrated": chosen["test_calibrated"]["all"]["kl_from_gold"],
             "ece_calibrated": chosen["test_calibrated"]["all"]["ece_15_bins"]}

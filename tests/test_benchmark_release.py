@@ -67,8 +67,10 @@ class BenchmarkTests(unittest.TestCase):
             self.assertIn("`orders=4`", table)
             # averaging wins on accuracy, so it is recommended with its own temperatures
             self.assertEqual(report["recommended"]["variant"], "orders=4")
-            self.assertEqual(report["recommended"]["anarkali_json"],
-                             {"orders": 4, "temperature_by_type": four["temperatures"]})
+            expected = {"orders": 4}
+            if report["recommended"]["temperatures_help"]:
+                expected["temperature_by_type"] = four["temperatures"]
+            self.assertEqual(report["recommended"]["anarkali_json"], expected)
             self.assertIn("Recommended release settings", table)
 
     def test_rescale_and_fit(self):

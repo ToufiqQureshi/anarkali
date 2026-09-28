@@ -147,8 +147,13 @@ coding = reports["coding"]["test_calibrated_by_type"]["all"]
 print(f"coding test (synthetic): acc={coding['accuracy']:.4f} ece={coding['ece_15_bins']:.4f}", flush=True)
 
 release = RUN / "release"
+raw, cal = typed["test_uncalibrated"]["all"], typed["test_calibrated_by_type"]["all"]
+# Ship the fitted temperatures only if they improve held-out calibration; 0.3.0 was already calibrated.
+use_temperatures = cal["ece_15_bins"] < raw["ece_15_bins"] and cal["soft_ce"] < raw["soft_ce"]
+print("per-type temperatures", "shipped" if use_temperatures else "not shipped (no calibration gain)", flush=True)
 run("export_onnx.py", "--checkpoint", WINNER_CKPT, "--output", release, "--data", A / "typed-decisions-v2",
-    "--name", "anarkali", "--abstain-below", "0.5", "--temperature-by-type", json.dumps(typed["temperature_by_type"]))
+    "--name", "anarkali", "--abstain-below", "0.5",
+    *(["--temperature-by-type", json.dumps(typed["temperature_by_type"])] if use_temperatures else []))
 backup = RUN / "anarkali-v4-backup.zip"
 with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
     for path in release.iterdir():
