@@ -235,11 +235,15 @@ with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
         z.write(path, f"logs/{path.name}")
 print("\\nBACKUP:", backup, "sha256", hashlib.sha256(backup.read_bytes()).hexdigest())
 # Kaggle keeps only /kaggle/working after a run; Colab users download from the file browser.
-import shutil
-if Path("/kaggle/working").exists():
-    shutil.copy(backup, "/kaggle/working/" + backup.name)
-    shutil.copy(WINNER_CKPT, "/kaggle/working/" + WINNER + "-best.pt")
-    print("Copied the backup and the winner checkpoint to /kaggle/working", flush=True)
+import os, shutil
+on_kaggle = Path("/kaggle").exists() or any(k.startswith("KAGGLE_") for k in os.environ)
+if on_kaggle:
+    keep = Path("/kaggle/working") if Path("/kaggle/working").is_dir() else Path.cwd()
+    shutil.copy(backup, keep / backup.name)
+    shutil.copy(WINNER_CKPT, keep / (WINNER + "-best.pt"))
+    print("Copied the backup and the winner checkpoint to", keep, sorted(p.name for p in keep.iterdir()), flush=True)
+else:
+    print("Not on Kaggle: download", backup, "from the file browser", flush=True)
 print("Upload release/ to the Hugging Face model repo after checking the numbers above.", flush=True)'''
 
 
