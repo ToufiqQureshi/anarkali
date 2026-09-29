@@ -4,7 +4,8 @@ Cell 1 rebuilds the benchmark data, streams the public sets (harvest_public_deci
 them with the 400M checkpoint from the V4 run (label_with_checkpoint.py) and, when a colibri server
 is reachable, with Brio (relabel_with_teachers.py --brio-teacher), then mixes every teacher with the
 human labels (combine_teachers.py). Cell 2 trains the 68M student with the 400M teacher online,
-next to a control trained on the same data without the teacher (two T4s run both at once), and
+next to the same student distilled on the benchmark data alone and a no-teacher control (two
+T4s run two at a time), and
 selects each epoch on the benchmark's own development cases. Cell 3 opens the test splits only
 after that, runs the real-world CI cases and exports ONNX. tests/test_notebook_distill.py checks it.
 """
@@ -112,6 +113,10 @@ common = [STUDENT_ARGS_VALUE, "--data", DATA, "--dev-data", BASE, "--model", STU
           "--revision", STUDENT_REVISION, "--epochs", EPOCHS,
           *(["--max-train-rows", MAX_TRAIN_ROWS] if MAX_TRAIN_ROWS else [])]
 jobs = {"distilled": [*common, "--teacher-checkpoint", TEACHER_CKPT, KD_ARGS_VALUE]}
+# The same teacher on the benchmark data alone: shows whether the public data helps or dilutes.
+base_only = [a for a in common]
+base_only[base_only.index("--data") + 1] = BASE
+jobs["distilled-base"] = [*base_only, "--teacher-checkpoint", TEACHER_CKPT, KD_ARGS_VALUE]
 if TRAIN_CONTROL:
     jobs["control"] = list(common)
 free_gpus = queue.Queue()
@@ -138,8 +143,8 @@ with ThreadPoolExecutor(max_workers=GPUS) as pool_:
     results = dict(pool_.map(train, jobs.items()))
 (RUN / "runs.json").write_text(json.dumps(results, indent=2))
 ok = {name: r for name, r in results.items() if r["status"] == "ok"}
-if "distilled" not in ok:
-    raise RuntimeError("the distilled student failed; see its traceback above")
+if not ok:
+    raise RuntimeError("every run failed; see the tracebacks above")
 for name, r in ok.items():
     print(f"  {name:10s} dev_acc={r['dev_accuracy']:.4f} dev_soft_ce={r['dev_soft_ce']:.4f} (benchmark development)")
 # The shipped model is chosen on development data only, before any test split is read.
