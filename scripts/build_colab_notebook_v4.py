@@ -60,6 +60,7 @@ EXTRA_SETS = []              # labelled sets you uploaded, e.g. ["/content/domai
 BACKBONE_BAKEOFF = False     # also train Ettin-150M/400M, ModernBERT-base, mmBERT-small (hours on a T4)
 ONLY_RECIPES = []            # train just these recipe names, in this order; [] trains every enabled recipe
 SILENCE_LIMIT_MIN = 30       # kill a script that prints nothing for this long, instead of burning GPU hours
+EXPORT_INT8 = True           # False skips the int8 recipes (slow on 400M encoders; 0.3.0's all failed parity)
 
 import collections, json, os, queue, subprocess, sys, threading, time
 from pathlib import Path
@@ -218,8 +219,9 @@ raw, cal = typed["development_uncalibrated"], typed["development_calibrated_by_t
 # not see; the test split only reports, it never decides. 0.3.0 was already calibrated.
 use_temperatures = cal["ece_15_bins"] < raw["ece_15_bins"] and cal["soft_ce"] < raw["soft_ce"]
 print("per-type temperatures", "shipped" if use_temperatures else "not shipped (no calibration gain)", flush=True)
+int8_flags = [] if EXPORT_INT8 else ["--no-int8"]
 run("export_onnx.py", "--checkpoint", WINNER_CKPT, "--output", release, "--data", A / "typed-decisions-v2",
-    "--name", "anarkali", "--abstain-below", "0.5",
+    "--name", "anarkali", "--abstain-below", "0.5", *int8_flags,
     *(["--temperature-by-type", json.dumps(typed["temperature_by_type"])] if use_temperatures else []))
 backup = RUN / "anarkali-v4-backup.zip"
 with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
@@ -232,6 +234,12 @@ with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
     for path in LOGS.glob("*.log"):
         z.write(path, f"logs/{path.name}")
 print("\\nBACKUP:", backup, "sha256", hashlib.sha256(backup.read_bytes()).hexdigest())
+# Kaggle keeps only /kaggle/working after a run; Colab users download from the file browser.
+import shutil
+if Path("/kaggle/working").exists():
+    shutil.copy(backup, "/kaggle/working/" + backup.name)
+    shutil.copy(WINNER_CKPT, "/kaggle/working/" + WINNER + "-best.pt")
+    print("Copied the backup and the winner checkpoint to /kaggle/working", flush=True)
 print("Upload release/ to the Hugging Face model repo after checking the numbers above.", flush=True)'''
 
 

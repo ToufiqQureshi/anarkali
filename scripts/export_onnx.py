@@ -47,6 +47,8 @@ def main():
                         help='per-type temperatures fitted on held-out data, e.g. \'{"choice": 1.2, "noul": 0.9}\'')
     parser.add_argument("--orders", type=int, default=1, help="default option orders the engine averages over")
     parser.add_argument("--max-int8-drift", type=float, default=0.02)
+    parser.add_argument("--no-int8", action="store_true",
+                        help="ship fp32 only; skips the int8 recipes, which take long on large encoders")
     parser.add_argument("--parity-rows", type=int, default=200)
     parser.add_argument("--latency-samples", type=int, default=100)
     args = parser.parse_args()
@@ -269,7 +271,7 @@ def main():
         raise SystemExit(f"fp32 ONNX parity failed: {fp32_metrics}")
 
     passing_int8 = []
-    for recipe in recipes:
+    for recipe in [] if args.no_int8 else recipes:
         graph_path = args.output / recipe["graph"]
         try:
             recipe["fn"](graph_path)
