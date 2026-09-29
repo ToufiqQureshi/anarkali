@@ -32,9 +32,18 @@ RECIPES = [
     # tested); the consistency term would be zero, so it is left out.
     {"name": "v4-shared", "model": "jhu-clsp/ettin-encoder-68m", "epochs": 8,
      "args": ["--encoder-lr", "5e-5", "--head-lr", "3e-4", *V4, "--shared-option-positions"]},
-    # Twice the size, still CPU-servable; enable when there is GPU time left.
-    {"name": "v4-full-150m", "model": "jhu-clsp/ettin-encoder-150m", "epochs": 8, "optional": True,
-     "args": ["--encoder-lr", "4e-5", "--head-lr", "3e-4", *V4, "--consistency-weight", "0.5"]},
+    # Backbone bake-off (BACKBONE_BAKEOFF = True): the same V4 objectives as v4-objectives, so only
+    # the encoder changes. All are ModernBERT-architecture models that load without remote code.
+    # NeoBERT is left out because it needs trust_remote_code.
+    {"name": "bb-ettin-150m", "model": "jhu-clsp/ettin-encoder-150m", "epochs": 8, "optional": True,
+     "args": ["--encoder-lr", "4e-5", "--head-lr", "3e-4", *V4]},
+    {"name": "bb-ettin-400m", "model": "jhu-clsp/ettin-encoder-400m", "epochs": 6, "optional": True,
+     "args": ["--encoder-lr", "3e-5", "--head-lr", "3e-4", "--batch-size", "8", *V4]},
+    {"name": "bb-modernbert-base", "model": "answerdotai/ModernBERT-base", "epochs": 8, "optional": True,
+     "args": ["--encoder-lr", "4e-5", "--head-lr", "3e-4", *V4]},
+    # Multilingual, for Hindi and Hinglish users later.
+    {"name": "bb-mmbert-small", "model": "jhu-clsp/mmBERT-small", "epochs": 8, "optional": True,
+     "args": ["--encoder-lr", "5e-5", "--head-lr", "3e-4", *V4]},
 ]
 
 
@@ -48,7 +57,7 @@ REPO_URL = "https://github.com/ToufiqQureshi/anarkali"
 REF = "main"                 # branch or tag to train
 AGENT_TRACES_PER_SOURCE = 0  # e.g. 500 adds real coding-agent steps (needs the Hub; ~10 min)
 EXTRA_SETS = []              # labelled sets you uploaded, e.g. ["/content/domain-decisions-v0-labelled"]
-TRAIN_150M = False           # also train the 150M recipe
+BACKBONE_BAKEOFF = False     # also train Ettin-150M/400M, ModernBERT-base, mmBERT-small (hours on a T4)
 
 import json, os, subprocess, sys
 from pathlib import Path
@@ -92,7 +101,7 @@ RUN = A / "v4-run"
 RUN.mkdir(parents=True, exist_ok=True)
 results = {}
 for recipe in RECIPES:
-    if recipe.get("optional") and not TRAIN_150M:
+    if recipe.get("optional") and not BACKBONE_BAKEOFF:
         continue
     out = RUN / recipe["name"]
     if not ((out / "training.json").exists() and (out / "best.pt").exists()):

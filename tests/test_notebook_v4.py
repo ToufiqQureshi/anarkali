@@ -66,6 +66,12 @@ class NotebookV4Tests(unittest.TestCase):
         self.assertEqual(baseline["name"], "v3-baseline")
         self.assertFalse(any(a in baseline["args"] for a in ("--brier-weight", "--consistency-weight", "--llrd")))
 
+    def test_backbone_bakeoff_is_opt_in(self):
+        optional = [r for r in self.builder.RECIPES if r.get("optional")]
+        self.assertGreaterEqual(len({r["model"] for r in optional}), 4)
+        self.assertIn("if recipe.get(\"optional\") and not BACKBONE_BAKEOFF", self.code[1])
+        self.assertIn("BACKBONE_BAKEOFF = False", self.code[0])
+
     def test_committed_notebook_is_current(self):
         committed = REPO / "notebooks" / "Anarkali_V4.ipynb"
         with tempfile.TemporaryDirectory() as tmp:
