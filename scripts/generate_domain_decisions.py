@@ -290,7 +290,9 @@ def generate(catalog: dict, domains: list[str], teacher: Teacher, cache: Respons
         seen, kept, calls, dropped, labelled, next_index = set(), 0, 0, 0, 0, 0
         max_calls = math.ceil(target / batch) * 3  # extra calls cover dropped and short replies
         while kept < target and next_index < max_calls:
-            wave = range(next_index, min(max_calls, next_index + max(1, math.ceil((target - kept) / batch * 1.15))))
+            # Waves of at most 8 calls per worker: progress shows (and is cached) as it goes.
+            size = min(max(1, math.ceil((target - kept) / batch * 1.15)), workers * 8)
+            wave = range(next_index, min(max_calls, next_index + size))
             next_index = wave.stop
             plans = [call_plan(name, domain, i, seed, batch, attributes) for i in wave]
 
@@ -381,6 +383,8 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--workers", type=int, default=1, help="parallel requests")
     parser.add_argument("--max-tokens", type=int, default=6000)
     parser.add_argument("--rpm", type=float, default=0.0)
+    parser.add_argument("--extra-body", type=json.loads, default={},
+                        help='JSON merged into every request, e.g. \'{"chat_template_kwargs": {"enable_thinking": false}}\' for Qwen3')
     parser.add_argument("--seed", type=int, default=20260929)
     parser.add_argument("--no-attributes", action="store_true",
                         help="leave industry, region, size, tone and length out of the prompt")
@@ -409,7 +413,7 @@ def main(argv: list[str] | None = None) -> dict:
     else:
         if not args.teacher:
             raise SystemExit("--teacher is required unless --print-prompt or --import-replies is given")
-        teacher = Teacher.parse(args.teacher, args.rpm, "sample")
+        teacher = Teacher.parse(args.teacher, args.rpm, "sample", args.extra_body)
         cases = {name: (math.ceil(args.rows_per_domain / len(catalog["domains"][name]["questions"]))
                         if args.rows_per_domain else args.cases_per_domain) for name in domains}
         cache = ResponseCache(args.output / "generation-cache.jsonl")

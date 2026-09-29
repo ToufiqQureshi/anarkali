@@ -91,7 +91,26 @@ python scripts/generate_domain_decisions.py --catalog scripts/domains/benchmark.
 Run `notebooks/Anarkali_V4.ipynb` with `ONLY_RECIPES = ['bb-ettin-400m']`. Keep
 `/kaggle/working/bb-ettin-400m-best.pt`: that is the 400M teacher (78.7% on typed-decisions test).
 
-### 1. Generate data with DeepSeek: 10 runs, 10 domains, about 20k rows each
+### 1a. Free: generate on Kaggle's GPUs with Qwen (no API key)
+
+`notebooks/Anarkali_Generate.ipynb` (built by `scripts/build_colab_notebook_generate.py`) does this for free:
+
+1. Choose Kaggle **GPU T4 x2** and turn **Internet on**, then Run All.
+2. The notebook installs vLLM and serves `Qwen/Qwen3-8B` (Apache-2.0) in fp16 across both T4s, as an
+   OpenAI-compatible server on `127.0.0.1:8000`.
+3. It runs `generate_domain_decisions.py` against that server for the ten domains below, with thinking
+   switched off.
+4. Every reply is cached in `/kaggle/working/synth/`, which survives as the notebook's output. When
+   the 12-hour session ends, attach that output as a dataset in the next session and set `RESUME_FROM`.
+   Nothing is generated twice.
+5. The last cell prints rows per domain, the share with generator labels and the answer balance,
+   then zips each domain.
+
+Qwen3-8B writes somewhat weaker cases than DeepSeek. The 400M agreement filter in step 2 is what
+keeps the bad ones out. Plan on one or two hours per domain on two T4s. That is an estimate, and
+the report cell shows the real rate.
+
+### 1b. Or: generate data with the DeepSeek API: 10 runs, 10 domains, about 20k rows each
 
 DeepSeek's API is OpenAI-compatible. Set `DEEPSEEK_API_KEY`, and check the current model name and
 price on DeepSeek's site; `deepseek-chat` is the non-thinking model, which is the right one for JSON.
