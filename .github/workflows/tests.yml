@@ -37,7 +37,7 @@ jobs:
       - run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e . "transformers==4.57.1"
-      - run: python -m unittest tests.test_shared_positions tests.test_training_v4 -v
+      - run: python -m unittest tests.test_shared_positions tests.test_training_v4 tests.test_distill_pipeline -v
 
   full:
     name: Full (torch + ONNX + released model)

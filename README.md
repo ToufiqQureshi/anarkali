@@ -227,6 +227,24 @@ python scripts/import_agent_traces.py --per-source 2000 --output artifacts/agent
 
 It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) has the plan and the reasoning.
 
+### Distillation: more data, a 400M teacher, a 68M student
+
+The V4 400M model reached 78.7% on typed-decisions but is six times slower than the 68M one. [`notebooks/Anarkali_Distill.ipynb`](notebooks/Anarkali_Distill.ipynb) moves its knowledge into the 68M model.
+- `harvest_public_decisions.py` streams large public datasets into typed decisions. The default is permissive licences only: Civil Comments (CC0), Amazon polarity (Apache-2.0), CLINC150 (CC-BY-3.0), GoEmotions (Apache-2.0), CommonsenseQA (MIT) and deepset prompt-injections (Apache-2.0). Share-alike sets need `--allow-share-alike`.
+- It writes two sets. `gold` holds the datasets' own human labels, soft where raters disagreed. `pool` holds the same texts with in-domain catalog questions for teachers to label.
+- `label_with_checkpoint.py` labels any set with the 400M checkpoint, averaged over option orders.
+- `relabel_with_teachers.py --brio-teacher NAME=MODEL@URL` adds a [colibri](https://github.com/JustVugg/colibri) Brio server as a teacher. It reads option probabilities from a large open model, one request per state.
+- `combine_teachers.py` fits each teacher's temperature on the human-labelled calibration rows, then mixes the teachers with the human label.
+- `train_anarkali.py --teacher-checkpoint` distils online: the student sees the same option order as the teacher (KL at a temperature plus option-vector matching). With `--dev-data`, each epoch is selected on the benchmark's own development cases.
+- The notebook trains a no-teacher control next to the student, so the gain is measured, not assumed. Test splits and the real-world CI cases are opened only after that choice.
+
+```bash
+python scripts/harvest_public_decisions.py --output artifacts/public-decisions-v0 --max-per-source 50000
+python scripts/label_with_checkpoint.py --checkpoint bb-ettin-400m-best.pt --input artifacts/public-decisions-v0/pool \
+  --output artifacts/public-pool-t400 --name anarkali400m --fill-unlabelled
+python scripts/combine_teachers.py --input artifacts/public-pool-t400 --output artifacts/public-pool-combined
+```
+
 ## Limits
 
 - English only.
@@ -236,4 +254,4 @@ It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) h
 
 ## Credits
 
-Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Built on the [Ettin](https://huggingface.co/jhu-clsp/ettin-encoder-68m) encoder (JHU CLSP, MIT). Benchmark data: [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (Apache-2.0). The `/v1/systemone` format follows Jev's public API, and the typed-question design follows Jev and Laya. Anarkali never trains on Jev outputs.
+Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Built on the [Ettin](https://huggingface.co/jhu-clsp/ettin-encoder-68m) encoder (JHU CLSP, MIT). Benchmark data: [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (Apache-2.0). Distillation data: the public datasets listed above; a harvest writes their credits to `CREDITS.md`. The `/v1/systemone` format follows Jev's public API, and the typed-question design follows Jev and Laya. Anarkali never trains on Jev outputs.

@@ -14,6 +14,11 @@ label_source "none" can be labelled, and only with --no-original.
 Use non-thinking models (e.g. Qwen3-*-Instruct-2507): a leading <think> token hides the
 letter. For hybrid Qwen3 on vLLM pass --extra-body '{"chat_template_kwargs": {"enable_thinking": false}}'.
 
+Brio teachers (--brio-teacher NAME=MODEL@BASE_URL, e.g. colibri's `coli serve` at
+http://127.0.0.1:8000/v1) are scored through POST /brio: the engine reads the probability of
+each option's text instead of generating a letter, so there is no position bias to average
+out and one request covers every question on a state (the state is read once).
+
 Teacher spec: NAME=MODEL@BASE_URL, with the API key read from $<NAME>_API_KEY (upper case,
 optional for local vLLM). Example (model ids are illustrative; check each provider's list):
 
@@ -56,7 +61,7 @@ class Teacher:
     base_url: str
     api_key: str | None = None
     rpm: float = 0.0
-    mode: str = "auto"  # auto | logprobs | sample
+    mode: str = "auto"  # auto | logprobs | sample | brio
     extra_body: dict = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _next_slot: float = 0.0
@@ -80,8 +85,8 @@ class Teacher:
         time.sleep(max(0.0, slot - now))
 
 
-def post_chat(teacher: Teacher, body: dict, retries: int = 6, timeout: float = 120.0) -> dict:
-    """POST /chat/completions with backoff on rate limits and server errors."""
+def post_json(teacher: Teacher, path: str, body: dict, retries: int = 6, timeout: float = 120.0) -> dict:
+    """POST <base_url><path> with backoff on rate limits and server errors."""
     headers = {"Content-Type": "application/json"}
     if teacher.api_key:
         headers["Authorization"] = f"Bearer {teacher.api_key}"
@@ -89,7 +94,7 @@ def post_chat(teacher: Teacher, body: dict, retries: int = 6, timeout: float = 1
     delay = 2.0
     for attempt in range(retries + 1):
         teacher.wait_for_slot()
-        request = urllib.request.Request(f"{teacher.base_url}/chat/completions", data=data, headers=headers)
+        request = urllib.request.Request(f"{teacher.base_url}{path}", data=data, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
@@ -106,6 +111,50 @@ def post_chat(teacher: Teacher, body: dict, retries: int = 6, timeout: float = 1
         time.sleep(min(wait, 120.0))
         delay *= 2
     raise AssertionError("unreachable")
+
+
+def post_chat(teacher: Teacher, body: dict, retries: int = 6, timeout: float = 120.0) -> dict:
+    """POST /chat/completions with backoff on rate limits and server errors."""
+    return post_json(teacher, "/chat/completions", body, retries, timeout)
+
+
+BRIO_MAX_QUESTIONS = 64
+
+
+def brio_options(row: dict) -> list[str]:
+    """Option strings for brio: the texts, or "id: text" when texts repeat (brio needs distinct options)."""
+    texts = [str(c["text"]).strip() for c in row["candidates"]]
+    if len(set(texts)) == len(texts) and all(texts):
+        return texts
+    return [f"{c['id']}: {text}" for c, text in zip(row["candidates"], texts)]
+
+
+def brio_state(row: dict) -> str:
+    return json.dumps(row["state"], ensure_ascii=False, sort_keys=True)
+
+
+def brio_probs(answer: dict, options: list[str]) -> list[float]:
+    """Map one brio answer back to the row's option order."""
+    by_option = {str(c["option"]): float(c["p"]) for c in answer.get("choices", [])}
+    if set(by_option) != set(options):
+        raise RuntimeError(f"brio answered options {sorted(by_option)}, asked {sorted(options)}")
+    mass = [max(0.0, by_option[o]) for o in options]
+    if sum(mass) <= 0:
+        raise RuntimeError("brio returned zero probability for every option")
+    return normalized(mass)
+
+
+def score_brio(teacher: Teacher, rows: list[dict]) -> list[list[float]]:
+    """Score rows that share one state in a single /brio request (the state is read once)."""
+    state = brio_state(rows[0])
+    if any(brio_state(r) != state for r in rows) or not 1 <= len(rows) <= BRIO_MAX_QUESTIONS:
+        raise ValueError("score_brio needs 1-64 rows with the same state")
+    questions = [{"question": r["question"], "options": brio_options(r)} for r in rows]
+    response = post_json(teacher, "/brio", {"state": state, "questions": questions})
+    answers = response.get("answers")
+    if not isinstance(answers, list) or len(answers) != len(rows):
+        raise RuntimeError(f"{teacher.name}: brio reply has no answer per question")
+    return [brio_probs(a, q["options"]) for a, q in zip(answers, questions)]
 
 
 def first_letter(text: str, k: int) -> str | None:
@@ -197,9 +246,47 @@ class Cache:
                 stream.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
+def brio_key(teacher: Teacher, row: dict) -> str:
+    raw = json.dumps([PROMPT_VERSION, "brio", teacher.model, teacher.extra_body, brio_state(row), row["question"],
+                      brio_options(row)], sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def prefetch_brio(teachers: list[Teacher], rows: list[dict], cache: Cache, workers: int):
+    """Fill the cache for brio teachers, one request per state and up to 64 questions per request."""
+    for teacher in (t for t in teachers if t.mode == "brio"):
+        by_state: dict[str, list[dict]] = {}
+        for row in rows:
+            if cache.get(brio_key(teacher, row)) is None:
+                by_state.setdefault(brio_state(row), []).append(row)
+        if by_state and cache.offline:
+            raise CacheMiss(f"{teacher.name}: {sum(map(len, by_state.values()))} rows not cached (offline run)")
+        groups = [part[i:i + BRIO_MAX_QUESTIONS] for part in by_state.values()
+                  for i in range(0, len(part), BRIO_MAX_QUESTIONS)]
+
+        def job(group, teacher=teacher):
+            for row, probs in zip(group, score_brio(teacher, group)):
+                cache.put({"key": brio_key(teacher, row), "teacher": teacher.name, "probs": probs, "source": "brio"})
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for index, _ in enumerate(pool.map(job, groups), 1):
+                if index % 50 == 0 or index == len(groups):
+                    print(f"{teacher.name}: brio scored {index}/{len(groups)} states", flush=True)
+
+
 def teacher_distribution(teacher: Teacher, row: dict, cache: Cache, samples: int, orders: int):
     """Average one teacher over cyclic option orders, mapped back to the original option order."""
     k = len(row["candidates"])
+    if teacher.mode == "brio":
+        # Options are scored as text, never listed in the prompt: order cannot matter.
+        key = brio_key(teacher, row)
+        entry = cache.get(key)
+        if entry is None:
+            if cache.offline:
+                raise CacheMiss(f"{teacher.name}: no cached score for row {row.get('case_id')} (offline run)")
+            entry = {"key": key, "teacher": teacher.name, "probs": score_brio(teacher, [row])[0], "source": "brio"}
+            cache.put(entry)
+        return list(entry["probs"]), 0.0, ["brio"]
     per_order, sources = [], set()
     for offset in range(min(orders, k)):
         prompt = letter_prompt(row["state"], row["question"], cyclic_texts(row, offset))
@@ -265,6 +352,8 @@ def score_only(args, teachers: list[Teacher], cache: Cache, splits: list[str]) -
         rows = [row for row in (rows if args.limit is None else rows[:args.limit])
                 if len(row["candidates"]) <= len(LETTERS)]
 
+        prefetch_brio(teachers, rows, cache, args.workers)
+
         def job(row):
             for teacher in teachers:
                 teacher_distribution(teacher, row, cache, args.samples, args.orders)
@@ -282,7 +371,9 @@ def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, required=True, help="prepared decision directory with manifest.json")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--teacher", action="append", required=True, help="NAME=MODEL@BASE_URL (repeat)")
+    parser.add_argument("--teacher", action="append", default=[], help="NAME=MODEL@BASE_URL (repeat)")
+    parser.add_argument("--brio-teacher", action="append", default=[],
+                        help="NAME=MODEL@BASE_URL of a colibri server, scored through POST /brio (repeat)")
     parser.add_argument("--splits", default="train",
                         help="comma-separated splits to relabel; test only for unlabelled generated sets")
     parser.add_argument("--mode", choices=("auto", "logprobs", "sample"), default="auto")
@@ -307,7 +398,10 @@ def main(argv: list[str] | None = None):
                         help='JSON merged into every request, e.g. \'{"chat_template_kwargs": {"enable_thinking": false}}\'')
     args = parser.parse_args(argv)
 
+    if not args.teacher and not args.brio_teacher:
+        raise SystemExit("give at least one --teacher or --brio-teacher")
     teachers = [Teacher.parse(spec, args.rpm, args.mode, args.extra_body) for spec in args.teacher]
+    teachers += [Teacher.parse(spec, args.rpm, "brio") for spec in args.brio_teacher]
     by_name = {t.name: t for t in teachers}
     for item in args.teacher_extra:
         name, sep, raw = item.partition("=")
@@ -348,6 +442,7 @@ def main(argv: list[str] | None = None):
         rest = rows[len(work):]
         too_wide = [row for row in work if len(row["candidates"]) > len(LETTERS)]
         work = [row for row in work if len(row["candidates"]) <= len(LETTERS)]
+        prefetch_brio(teachers, work, cache, args.workers)
 
         def job(row):
             return relabel_row(row, teachers, cache, samples=args.samples, orders=args.orders,

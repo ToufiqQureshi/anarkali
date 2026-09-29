@@ -23,7 +23,8 @@ def digest(payload):
 
 
 def load_rows(path):
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    with Path(path).open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
 
 
 def collate(rows, tokenizer, torch, max_state, max_question, max_candidate):
@@ -93,6 +94,20 @@ def main():
                         help="start every option at the same position ID, so full-attention layers cannot see option order")
     parser.add_argument("--ema-decay", type=float, default=0.0,
                         help="evaluate and save an exponential moving average of the weights (e.g. 0.999)")
+    # Distillation from a trained packed checkpoint (e.g. the 400M winner) into this model
+    parser.add_argument("--teacher-checkpoint", type=Path, default=None,
+                        help="packed best.pt scored online on every training batch, under the same option order")
+    parser.add_argument("--kd-weight", type=float, default=1.0, help="weight of KL(teacher || student)")
+    parser.add_argument("--kd-temperature", type=float, default=2.0)
+    parser.add_argument("--hidden-weight", type=float, default=0.0,
+                        help="add w * (1 - cosine) between projected student and teacher option vectors")
+    parser.add_argument("--max-train-rows", type=int, default=0,
+                        help="train on a seeded sample of this many rows (0 = all)")
+    parser.add_argument("--dev-data", type=Path, default=None,
+                        help="read the development split from this directory instead of --data, so a huge public "
+                             "mix is selected on the benchmark's own development cases")
+    parser.add_argument("--max-dev-rows", type=int, default=0,
+                        help="evaluate each epoch on a seeded sample of this many development rows (0 = all)")
     args = parser.parse_args()
     args.output = args.output or REPO / "artifacts" / f"anarkali-{args.architecture}-v2"
     if args.epochs < 1 or args.batch_size < 1:
@@ -110,6 +125,14 @@ def main():
     if not 0 < args.llrd <= 1 or not 0 <= args.ema_decay < 1:
         raise ValueError("llrd must be in (0, 1] and ema-decay in [0, 1)")
     use_objectives = bool(args.brier_weight or args.rps_weight or args.consistency_weight or args.weight_field)
+    if args.teacher_checkpoint and args.architecture != "packed":
+        raise ValueError("--teacher-checkpoint needs --architecture packed")
+    if args.kd_weight < 0 or args.hidden_weight < 0 or not 0.5 <= args.kd_temperature <= 10:
+        raise ValueError("kd/hidden weights must be nonnegative and kd-temperature in [0.5, 10]")
+    if args.hidden_weight and not args.teacher_checkpoint:
+        raise ValueError("--hidden-weight needs --teacher-checkpoint")
+    if args.max_train_rows < 0 or args.max_dev_rows < 0:
+        raise ValueError("--max-train-rows and --max-dev-rows must be nonnegative")
     if args.shared_option_positions and args.architecture != "packed":
         raise ValueError("--shared-option-positions needs --architecture packed")
     if use_objectives and args.architecture != "packed":
@@ -124,8 +147,9 @@ def main():
     from anarkali.joint import JointChoiceModel, collate_joint
     from anarkali.packed import PackedChoiceModel, collate_packed, shuffle_candidates
     from anarkali.diagnostics import development_controls, state_ablations
-    from anarkali.objectives import (EMA, decision_losses, layerwise_groups, lr_lambda, ordinal_index,
-                                     row_weights, shuffle_with_index, symmetric_kl, to_original_order)
+    from anarkali.objectives import (EMA, decision_losses, distillation_kl, layerwise_groups, lr_lambda,
+                                     option_vector_loss, ordinal_index, row_weights, shuffle_with_index,
+                                     symmetric_kl, to_original_order)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -144,12 +168,31 @@ def main():
         pass
 
     manifest = json.loads((args.data / "manifest.json").read_text(encoding="utf-8"))
-    for name in ("train", "development") + (("test",) if args.evaluate_test else ()):
-        path = args.data / f"{name}.jsonl"
-        actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual_sha != manifest['split_counts'][name]['sha256']:
-            raise ValueError(f"dataset manifest hash mismatch: {name}")
-    train_rows, dev_rows = (load_rows(args.data / f"{name}.jsonl") for name in ("train", "development"))
+    dev_dir = args.dev_data or args.data
+    dev_manifest = json.loads((dev_dir / "manifest.json").read_text(encoding="utf-8")) if args.dev_data else manifest
+    for directory, split_manifest, name in ([(args.data, manifest, "train"), (dev_dir, dev_manifest, "development")]
+                                            + ([(args.data, manifest, "test")] if args.evaluate_test else [])):
+        actual_sha = hashlib.sha256((directory / f"{name}.jsonl").read_bytes()).hexdigest()
+        if actual_sha != split_manifest['split_counts'][name]['sha256']:
+            raise ValueError(f"dataset manifest hash mismatch: {directory.name}/{name}")
+    train_rows, dev_rows = load_rows(args.data / "train.jsonl"), load_rows(dev_dir / "development.jsonl")
+    if args.dev_data:
+        leaked = {r["source_group"] for r in dev_rows} & {r["source_group"] for r in train_rows}
+        if leaked:
+            raise ValueError(f"{len(leaked)} development source groups also appear in training, e.g. {next(iter(leaked))}")
+    # Rows with label_source "none" carry a placeholder uniform target: only a teacher can label them.
+    unlabelled_dev = sum(r.get("label_source") == "none" for r in dev_rows)
+    dev_rows = [r for r in dev_rows if r.get("label_source") != "none"]
+    unlabelled_train = sum(r.get("label_source") == "none" for r in train_rows)
+    if unlabelled_train and not args.teacher_checkpoint:
+        raise ValueError(f"{unlabelled_train} training rows have label_source 'none'; label them first "
+                         "(label_with_checkpoint.py, relabel_with_teachers.py) or pass --teacher-checkpoint")
+    if not dev_rows:
+        raise ValueError("no labelled development rows")
+    if args.max_train_rows and len(train_rows) > args.max_train_rows:
+        train_rows = random.Random(args.seed).sample(train_rows, args.max_train_rows)
+    if args.max_dev_rows and len(dev_rows) > args.max_dev_rows:
+        dev_rows = random.Random(args.seed + 1).sample(dev_rows, args.max_dev_rows)
     prior_report = development_controls(train_rows, dev_rows)
     if args.overfit_source_cases:
         groups = sorted({r["source_group"] for r in train_rows})
@@ -168,6 +211,15 @@ def main():
         model = JointChoiceModel(encoder).to(device)
     else:
         model = EncoderChoiceModel(encoder, HeadConfig(encoder_dim=encoder.config.hidden_size)).to(device)
+    teacher = projector = None
+    if args.teacher_checkpoint:
+        from anarkali.checkpoint import load_packed_checkpoint
+        teacher = load_packed_checkpoint(args.teacher_checkpoint, device, args.cache_dir)
+        teacher.model.requires_grad_(False)
+        if args.hidden_weight:
+            # Maps student option vectors into the teacher's width; trained with the head, never saved.
+            projector = torch.nn.Linear(encoder.config.hidden_size,
+                                        teacher.model.encoder.config.hidden_size).to(device)
     def make_batch(rows):
         values = (collate_packed(rows, tokenizer, args.packed_max_tokens, args.shared_option_positions)
                   if args.architecture == "packed"
@@ -176,18 +228,24 @@ def main():
                                args.max_question_tokens, args.max_candidate_tokens))
         return tuple(v.to(device) for v in values)
     run_config = {**vars(args), "data": str(args.data), "output": str(args.output), "cache_dir": str(args.cache_dir),
+                  "dev_data": str(args.dev_data) if args.dev_data else None,
+                  "teacher_checkpoint": str(args.teacher_checkpoint) if args.teacher_checkpoint else None,
+                  "teacher_model_id": teacher.raw["model_id"] if teacher else None,
+                  "unlabelled_train_rows_teacher_filled": unlabelled_train,
+                  "unlabelled_development_rows_skipped": unlabelled_dev,
                   "model_revision": revision, "torch": torch.__version__,
                   "parameter_count": sum(p.numel() for p in model.parameters()),
                   "candidate_order_augmentation": args.architecture == "packed",
                   "train_decisions": len(train_rows), "development_decisions": len(dev_rows),
                   "precision": "cuda_fp16_autocast" if use_amp else "float32"}
     if args.llrd < 1:
-        optimizer = torch.optim.AdamW(layerwise_groups(model, args.encoder_lr, args.head_lr, args.llrd))
+        groups = layerwise_groups(model, args.encoder_lr, args.head_lr, args.llrd)
     else:
-        optimizer = torch.optim.AdamW([
-            {"params": model.encoder.parameters(), "lr": args.encoder_lr},
-            {"params": model.head.parameters(), "lr": args.head_lr},
-        ], weight_decay=0.01)
+        groups = [{"params": model.encoder.parameters(), "lr": args.encoder_lr},
+                  {"params": model.head.parameters(), "lr": args.head_lr}]
+    if projector is not None:
+        groups.append({"params": projector.parameters(), "lr": args.head_lr})
+    optimizer = torch.optim.AdamW(groups) if args.llrd < 1 else torch.optim.AdamW(groups, weight_decay=0.01)
     steps_per_epoch = (len(train_rows) + args.batch_size - 1) // args.batch_size
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda(args.epochs * steps_per_epoch, args.warmup_ratio, args.schedule))
@@ -245,8 +303,23 @@ def main():
             values = make_batch(part)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
-                out = model(*values[:-1])
+                if teacher is not None:
+                    # Same rows, same option order: the student matches the teacher on exactly
+                    # the view it sees (Beyer et al. 2022, "patient and consistent" distillation).
+                    with torch.no_grad():
+                        teacher_out, teacher_vectors = teacher.model(*teacher.batch(part, device),
+                                                                     return_option_vectors=True)
+                    teacher_logits = teacher_out.logits.float()
+                if projector is not None:
+                    out, student_vectors = model(*values[:-1], return_option_vectors=True)
+                else:
+                    out = model(*values[:-1])
                 targets = sharpen(values[-1])
+                if teacher is not None:
+                    unlabelled = torch.tensor([r.get("label_source") == "none" for r in part], device=device)
+                    if unlabelled.any():
+                        teacher_probs = torch.softmax(teacher_logits, -1).to(targets.dtype)
+                        targets = torch.where(unlabelled[:, None], teacher_probs, targets)
                 if not use_objectives:
                     loss = training_loss(out, targets)["loss"]
                 else:
@@ -261,6 +334,12 @@ def main():
                         valid = torch.arange(probs_a.shape[1], device=probs_a.device)[None, :] < \
                             torch.tensor([len(r["candidates"]) for r in original], device=probs_a.device)[:, None]
                         loss = loss + args.consistency_weight * symmetric_kl(probs_a, probs_b, valid)
+                if teacher is not None:
+                    loss = loss + args.kd_weight * distillation_kl(out.logits, teacher_logits, out.candidate_mask,
+                                                                   args.kd_temperature)
+                if projector is not None:
+                    loss = loss + args.hidden_weight * option_vector_loss(
+                        projector(student_vectors.float()), teacher_vectors, out.candidate_mask)
             if not torch.isfinite(loss.detach()).item():
                 raise RuntimeError("nonfinite training loss")
             scaler.scale(loss).backward()

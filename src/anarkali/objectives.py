@@ -194,3 +194,30 @@ class EMA:
         for key, value in self.backup.items():
             state[key].copy_(value)
         self.backup = None
+
+
+def distillation_kl(student_logits: torch.Tensor, teacher_logits: torch.Tensor, mask: torch.Tensor,
+                    temperature: float = 2.0) -> torch.Tensor:
+    """KL(teacher || student) at a temperature, times T^2 so its gradients match the hard loss's scale.
+
+    Hinton, Vinyals and Dean 2015 (arXiv:1503.02531). Both inputs are raw scores over the same
+    options in the same order; padded options are masked out.
+    """
+    t = float(temperature)
+    s = torch.log_softmax(student_logits.float().masked_fill(~mask, -1e4) / t, dim=-1)
+    q = torch.log_softmax(teacher_logits.float().masked_fill(~mask, -1e4) / t, dim=-1)
+    kl = (q.exp() * (q - s)).masked_fill(~mask, 0).sum(-1)
+    return kl.mean() * t * t
+
+
+def option_vector_loss(student_vectors: torch.Tensor, teacher_vectors: torch.Tensor,
+                       mask: torch.Tensor) -> torch.Tensor:
+    """1 - cosine similarity between projected student and teacher option vectors, over real options.
+
+    A light form of feature distillation (FitNets, Romero et al. 2015, arXiv:1412.6550; MiniLM,
+    Wang et al. 2020, arXiv:2002.10957): the student learns what the teacher sees in each option,
+    not only its final score. Cosine, not MSE, so the two models' scales need not match.
+    """
+    cos = torch.nn.functional.cosine_similarity(student_vectors.float(), teacher_vectors.float(), dim=-1)
+    valid = mask.float()
+    return ((1 - cos) * valid).sum() / valid.sum().clamp_min(1)

@@ -1,7 +1,8 @@
 """Concatenate prepared decision sets split-by-split into one training directory.
 
 Default: typed-decisions-v2 (public benchmark) + coding-decisions-v0 (synthetic coding
-workflows) -> anarkali-decisions-v3. Source groups must not collide across inputs.
+workflows) -> anarkali-decisions-v3. A source group may appear in several inputs (the harvested
+gold and pool sets share their texts) but never in two different splits.
 """
 import argparse
 import hashlib
@@ -36,7 +37,7 @@ def main():
                     continue
                 group = json.loads(line)['source_group']
                 owner = seen_groups.setdefault(group, (directory.name, name))
-                if owner != (directory.name, name):
+                if owner[1] != name:
                     raise ValueError(f'source group {group} appears in {owner} and {(directory.name, name)}')
                 groups.add(group)
                 lines.append(line)
@@ -46,7 +47,7 @@ def main():
                         'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     revision = hashlib.sha256(json.dumps([m.get('revision') for m in manifests]).encode()).hexdigest()[:16]
     manifest = {'dataset': 'anarkali-decisions-v3', 'revision': revision,
-                'sources': [{'path': str(d.relative_to(REPO)), 'dataset': m.get('dataset'), 'revision': m.get('revision'),
+                'sources': [{'path': str(d.resolve().relative_to(REPO) if d.resolve().is_relative_to(REPO) else d), 'dataset': m.get('dataset'), 'revision': m.get('revision'),
                              'label_source': m.get('label_source')} for d, m in zip(args.inputs, manifests)],
                 'split_unit': 'source groups inherited from each input; no group appears in two splits',
                 'split_counts': counts}

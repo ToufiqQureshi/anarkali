@@ -27,10 +27,13 @@ class PackedHead(nn.Module):
                                     nn.Linear(config.encoder_dim, config.hidden_dim),
                                     nn.GELU(), nn.Dropout(config.dropout), nn.Linear(config.hidden_dim, 1))
 
-    def forward(self, tokens, spans):
+    def pool(self, tokens, spans):
+        """Mean of each option's token states: [batch, candidates, dim]."""
         weights = spans.to(tokens.dtype)
-        pooled = torch.bmm(weights, tokens) / weights.sum(-1, keepdim=True).clamp_min(1)
-        return self.scorer(pooled).squeeze(-1)
+        return torch.bmm(weights, tokens) / weights.sum(-1, keepdim=True).clamp_min(1)
+
+    def forward(self, tokens, spans):
+        return self.scorer(self.pool(tokens, spans)).squeeze(-1)
 
 
 def _is_modernbert(encoder):
@@ -102,7 +105,8 @@ class PackedChoiceModel(nn.Module):
         return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long(),
                             position_ids=position_ids).last_hidden_state
 
-    def forward(self, input_ids, attention_mask, candidate_spans, position_ids=None):
+    def forward(self, input_ids, attention_mask, candidate_spans, position_ids=None, return_option_vectors=False):
+        """Scores per option; with return_option_vectors, also the pooled option states (for distillation)."""
         if input_ids.ndim != 2 or input_ids.dtype != torch.long:
             raise ValueError('packed IDs must be int64 [batch, tokens]')
         if attention_mask.dtype != torch.bool or attention_mask.shape != input_ids.shape:
@@ -119,8 +123,10 @@ class PackedChoiceModel(nn.Module):
         if self.shared_option_positions and position_ids is None:
             raise ValueError('this model was trained with shared option positions; pass position_ids')
         tokens = self.encode(input_ids, attention_mask, position_ids)
-        logits = self.head(tokens, candidate_spans).masked_fill(~valid, float('-inf'))
-        return HeadOutput(logits, logits.new_zeros(input_ids.shape[0]), valid)
+        pooled = self.head.pool(tokens, candidate_spans)
+        logits = self.head.scorer(pooled).squeeze(-1).masked_fill(~valid, float('-inf'))
+        out = HeadOutput(logits, logits.new_zeros(input_ids.shape[0]), valid)
+        return (out, pooled) if return_option_vectors else out
 
 
 def collate_packed(rows, tokenizer, max_tokens=512, shared_positions=False):
