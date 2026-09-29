@@ -148,6 +148,8 @@ def main():
     calibration = score(load_rows(args.data/'calibration.jsonl'))
     temperature = fit_temperature(calibration)
     temperature_by_type = fit_temperature_by_type(calibration)
+    # Held out from the temperature fit, so a release can decide on temperatures without the test split.
+    development = score(load_rows(args.data/'development.jsonl'))
     test_rows = load_rows(args.data/'test.jsonl')
     test = score(test_rows)
     reversed_rows = [dict(r, candidates=r['candidates'][::-1], target=r['target'][::-1]) for r in test_rows]
@@ -200,6 +202,8 @@ def main():
         'test_calibrated_by_type': metrics(with_temperature_by_type(test, temperature_by_type), 1.0),
         'test_order_averaged_uncalibrated': metrics(averaged, 1.0),
         'calibration_uncalibrated': metrics(calibration, 1.0)['all'],
+        'development_uncalibrated': metrics(development, 1.0)['all'],
+        'development_calibrated_by_type': metrics(with_temperature_by_type(development, temperature_by_type), 1.0)['all'],
         'order_reversal_argmax_change_fraction': flips / len(test),
         'selective_uncalibrated': selective(test, 1.0),
         'latency': {'device': str(device), 'torch': torch.__version__, 'threads': torch.get_num_threads(),

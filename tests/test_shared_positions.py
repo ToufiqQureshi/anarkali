@@ -65,19 +65,21 @@ class InvarianceTests(unittest.TestCase):
         self.assertGreater(self.permutation_gap(plain, False), 1e-4)  # absolute positions do see the order
 
     def test_modernbert_global_attention_is_invariant_and_local_attention_runs(self):
-        def encoder(every):
+        def encoder(window):
             torch.manual_seed(0)
             return ModernBertModel(ModernBertConfig(
                 vocab_size=24, hidden_size=32, intermediate_size=48, num_hidden_layers=3, num_attention_heads=4,
-                global_attn_every_n_layers=every, local_attention=8, max_position_embeddings=128,
+                global_attn_every_n_layers=3, local_attention=window, max_position_embeddings=128,
                 pad_token_id=0, cls_token_id=1, sep_token_id=2, bos_token_id=1, eos_token_id=2))
-        all_global = PackedChoiceModel(encoder(1), dropout=0, shared_option_positions=True).eval()
+        # A local window wider than every sequence makes all layers global. (global_attn_every_n_layers=1
+        # says the same, but transformers 5.8 rejects its rope config.)
+        all_global = PackedChoiceModel(encoder(512), dropout=0, shared_option_positions=True).eval()
         self.assertLess(self.permutation_gap(all_global, True), 1e-4)
         # Ettin's layout: local sliding-window layers between global ones. Measuring the window in
         # position IDs keeps these order-blind too.
-        ettin_like = PackedChoiceModel(encoder(3), dropout=0, shared_option_positions=True).eval()
+        ettin_like = PackedChoiceModel(encoder(8), dropout=0, shared_option_positions=True).eval()
         self.assertLess(self.permutation_gap(ettin_like, True), 1e-5)
-        plain = PackedChoiceModel(encoder(3), dropout=0).eval()
+        plain = PackedChoiceModel(encoder(8), dropout=0).eval()
         self.assertGreater(self.permutation_gap(plain, False), 1e-5)
 
     def test_padded_batches_stay_finite_and_match_single_rows(self):

@@ -72,6 +72,34 @@ class NotebookV4Tests(unittest.TestCase):
         self.assertIn("if recipe.get(\"optional\") and not BACKBONE_BAKEOFF", self.code[1])
         self.assertIn("BACKBONE_BAKEOFF = False", self.code[0])
 
+    def test_temperatures_are_chosen_without_the_test_split(self):
+        final = self.code[2]
+        decision = final[final.index("use_temperatures ="):].splitlines()[0]
+        self.assertIn('raw, cal = typed["development_uncalibrated"], typed["development_calibrated_by_type"]', final)
+        self.assertNotIn("test", decision)
+
+    def test_run_surfaces_errors_and_kills_silent_scripts(self):
+        setup = self.code[0]
+        namespace = {}
+        # the cell's imports minus torch, which the core CI job does not install
+        exec(setup[setup.index("import collections"):setup.index("import torch")], namespace)
+        source = setup[setup.index("def run("):]
+        source = source[:source.index("\nA = ROOT")]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir()
+            (root / "scripts" / "boom.py").write_text("print('step 1')\nraise SystemExit('real cause: bad mask')\n")
+            (root / "scripts" / "hang.py").write_text("import time\nprint('start', flush=True)\ntime.sleep(60)\n")
+            namespace.update(ROOT=root, LOGS=root / "logs", SILENCE_LIMIT_MIN=0.02)
+            exec(source, namespace)
+            with self.assertRaises(RuntimeError) as failed:
+                namespace["run"]("boom.py", tag="boom")
+            self.assertIn("real cause: bad mask", str(failed.exception))
+            self.assertIn("real cause: bad mask", next((root / "logs").glob("*boom.log")).read_text())
+            with self.assertRaises(RuntimeError) as hung:
+                namespace["run"]("hang.py")
+            self.assertIn("printed nothing", str(hung.exception))
+
     def test_committed_notebook_is_current(self):
         committed = REPO / "notebooks" / "Anarkali_V4.ipynb"
         with tempfile.TemporaryDirectory() as tmp:

@@ -58,21 +58,61 @@ REF = "main"                 # branch or tag to train
 AGENT_TRACES_PER_SOURCE = 0  # e.g. 500 adds real coding-agent steps (needs the Hub; ~10 min)
 EXTRA_SETS = []              # labelled sets you uploaded, e.g. ["/content/domain-decisions-v0-labelled"]
 BACKBONE_BAKEOFF = False     # also train Ettin-150M/400M, ModernBERT-base, mmBERT-small (hours on a T4)
+ONLY_RECIPES = []            # train just these recipe names, in this order; [] trains every enabled recipe
+SILENCE_LIMIT_MIN = 30       # kill a script that prints nothing for this long, instead of burning GPU hours
 
-import json, os, subprocess, sys
+import collections, json, os, queue, subprocess, sys, threading, time
 from pathlib import Path
 import torch
 if not torch.cuda.is_available():
     raise RuntimeError("Select a GPU (T4) runtime, then Run All.")
-print("GPU:", torch.cuda.get_device_name(0), "| python", sys.version.split()[0], flush=True)
+GPUS = torch.cuda.device_count()
+print("GPU:", GPUS, "x", torch.cuda.get_device_name(0), "| python", sys.version.split()[0], flush=True)
 ROOT = Path("/content/anarkali") if Path("/content").exists() else Path.cwd() / "anarkali"
 if not ROOT.exists():
     subprocess.run(["git", "clone", "--depth", "1", "--branch", REF, REPO_URL, str(ROOT)], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", f"{ROOT}[train,onnx]", "datasets", "onnx"],
                check=True)
+LOGS = ROOT / "artifacts" / "logs"
 
-def run(script, *args):
-    subprocess.run([sys.executable, "-u", str(ROOT / "scripts" / script), *map(str, args)], cwd=ROOT, check=True)
+def run(script, *args, gpu=None, tag=""):
+    """Run a script with its stdout and stderr in the cell and in a log file.
+
+    A failure raises with the script's last lines, so the real error is never hidden, and a script
+    that stays silent for SILENCE_LIMIT_MIN is killed so a hang cannot use up the GPU quota.
+    """
+    LOGS.mkdir(parents=True, exist_ok=True)
+    log = LOGS / f"{time.strftime('%H%M%S')}-{tag or Path(script).stem}.log"
+    env = dict(os.environ, PYTHONUNBUFFERED="1", HF_HUB_DISABLE_PROGRESS_BARS="1", TQDM_DISABLE="1",
+               TRANSFORMERS_VERBOSITY="error")
+    if gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    proc = subprocess.Popen([sys.executable, "-u", str(ROOT / "scripts" / script), *map(str, args)], cwd=ROOT,
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    lines, tail = queue.Queue(), collections.deque(maxlen=60)
+
+    def pump():
+        for line in proc.stdout:
+            lines.put(line)
+        lines.put(None)
+    threading.Thread(target=pump, daemon=True).start()
+    prefix = f"[{tag}] " if tag else ""
+    with log.open("w", encoding="utf-8") as stream:
+        while True:
+            try:
+                line = lines.get(timeout=SILENCE_LIMIT_MIN * 60)
+            except queue.Empty:
+                proc.kill()
+                raise RuntimeError(f"{script} printed nothing for {SILENCE_LIMIT_MIN} min and was killed; log {log}")
+            if line is None:
+                break
+            print(prefix + line, end="", flush=True)
+            stream.write(line)
+            stream.flush()
+            tail.append(line)
+    code = proc.wait()
+    if code:
+        raise RuntimeError(f"{script} exited with {code}; last lines:\\n" + "".join(tail))
 
 A = ROOT / "artifacts"
 if not (A / "typed-decisions-v2" / "manifest.json").exists():
@@ -94,33 +134,50 @@ run("merge_decision_sets.py", "--inputs", *inputs, "--output", DATA)
 counts = json.loads((DATA / "manifest.json").read_text())["split_counts"]
 print("Training data:", {k: v["decision_cases"] for k, v in counts.items()}, flush=True)'''
 
-TRAIN = '''import time, traceback
+TRAIN = '''import time
+from concurrent.futures import ThreadPoolExecutor
 from huggingface_hub import HfApi
 RECIPES = RECIPES_VALUE
 RUN = A / "v4-run"
 RUN.mkdir(parents=True, exist_ok=True)
-results = {}
-for recipe in RECIPES:
-    if recipe.get("optional") and not BACKBONE_BAKEOFF:
-        continue
+by_name = {recipe["name"]: recipe for recipe in RECIPES}
+if ONLY_RECIPES:
+    todo = [by_name[name] for name in ONLY_RECIPES]
+else:
+    todo = []
+    for recipe in RECIPES:
+        if recipe.get("optional") and not BACKBONE_BAKEOFF:
+            continue
+        todo.append(recipe)
+free_gpus = queue.Queue()
+for gpu in range(GPUS):
+    free_gpus.put(gpu)
+
+def train(recipe):
+    """Train one recipe on a free GPU; with two GPUs (Kaggle T4 x2) two recipes run at once."""
     out = RUN / recipe["name"]
     if not ((out / "training.json").exists() and (out / "best.pt").exists()):
+        gpu = free_gpus.get()
         started = time.time()
         try:
             revision = HfApi().model_info(recipe["model"]).sha
-            print(f"\\n=== {recipe['name']}: {recipe['model']} ===", flush=True)
+            print(f"\\n=== {recipe['name']}: {recipe['model']} on GPU {gpu} ===", flush=True)
             run("train_anarkali.py", *BASE_VALUE, "--data", DATA, "--model", recipe["model"], "--revision", revision,
-                "--epochs", recipe["epochs"], *recipe["args"], "--output", out)
+                "--epochs", recipe["epochs"], *recipe["args"], "--output", out, gpu=gpu, tag=recipe["name"])
         except Exception as exc:
-            traceback.print_exc()
-            results[recipe["name"]] = {"status": "failed", "error": repr(exc)[:400]}
-            continue
+            print(f"\\n!!! {recipe['name']} FAILED:\\n{exc}", flush=True)
+            return {"status": "failed", "error": str(exc)[-3000:]}
+        finally:
+            free_gpus.put(gpu)
         print(f"{recipe['name']} trained in {(time.time() - started) / 60:.1f} min", flush=True)
     training = json.loads((out / "training.json").read_text())
-    results[recipe["name"]] = {"status": "ok", "dir": str(out), "model": recipe["model"],
-                               "parameters": training["run_config"]["parameter_count"],
-                               "dev_accuracy": training["best_development_argmax_accuracy"],
-                               "dev_soft_ce": training["best_development_soft_ce"]}
+    return {"status": "ok", "dir": str(out), "model": recipe["model"],
+            "parameters": training["run_config"]["parameter_count"],
+            "dev_accuracy": training["best_development_argmax_accuracy"],
+            "dev_soft_ce": training["best_development_soft_ce"]}
+
+with ThreadPoolExecutor(max_workers=GPUS) as pool:
+    results = dict(zip([r["name"] for r in todo], pool.map(train, todo)))
 (RUN / "bakeoff.json").write_text(json.dumps(results, indent=2))
 
 ok = {name: r for name, r in results.items() if r["status"] == "ok"}
@@ -156,8 +213,9 @@ coding = reports["coding"]["test_calibrated_by_type"]["all"]
 print(f"coding test (synthetic): acc={coding['accuracy']:.4f} ece={coding['ece_15_bins']:.4f}", flush=True)
 
 release = RUN / "release"
-raw, cal = typed["test_uncalibrated"]["all"], typed["test_calibrated_by_type"]["all"]
-# Ship the fitted temperatures only if they improve held-out calibration; 0.3.0 was already calibrated.
+raw, cal = typed["development_uncalibrated"], typed["development_calibrated_by_type"]
+# Ship the fitted temperatures only if they improve calibration on development data, which the fit did
+# not see; the test split only reports, it never decides. 0.3.0 was already calibrated.
 use_temperatures = cal["ece_15_bins"] < raw["ece_15_bins"] and cal["soft_ce"] < raw["soft_ce"]
 print("per-type temperatures", "shipped" if use_temperatures else "not shipped (no calibration gain)", flush=True)
 run("export_onnx.py", "--checkpoint", WINNER_CKPT, "--output", release, "--data", A / "typed-decisions-v2",
@@ -171,6 +229,8 @@ with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
     for name in reports:
         z.write(RUN / f"eval-{name}" / "test-report.json", f"eval-{name}/test-report.json")
     z.writestr("winner.json", json.dumps({"winner": WINNER, **ok[WINNER]}, indent=2))
+    for path in LOGS.glob("*.log"):
+        z.write(path, f"logs/{path.name}")
 print("\\nBACKUP:", backup, "sha256", hashlib.sha256(backup.read_bytes()).hexdigest())
 print("Upload release/ to the Hugging Face model repo after checking the numbers above.", flush=True)'''
 
