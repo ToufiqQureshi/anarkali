@@ -7,7 +7,8 @@ human labels (combine_teachers.py). Cell 2 trains the 68M student with the 400M 
 next to the same student distilled on the benchmark data alone and a no-teacher control (two
 T4s run two at a time), and
 selects each epoch on the benchmark's own development cases. Cell 3 opens the test splits only
-after that, runs the real-world CI cases and exports ONNX. tests/test_notebook_distill.py checks it.
+after that and exports ONNX. Coding and CI data are left out for now: the goal is the typed +
+general decision model. tests/test_notebook_distill.py checks it.
 """
 import importlib.util
 import json
@@ -44,6 +45,9 @@ ALLOW_SHARE_ALIKE = False    # also SNLI, MultiNLI, BoolQ, DBpedia (CC-BY-SA)
 BRIO_URL = ""                # e.g. "http://127.0.0.1:8000/v1" when colibri `coli serve` runs; "" skips Brio
 BRIO_MODEL = "qwen36"
 BRIO_MAX_ROWS = 20000        # Brio reads a whole LLM per state: label a sample of the pool with it
+# Folders from generate_domain_decisions.py (e.g. DeepSeek runs), attached as Kaggle datasets
+SYNTHETIC_SETS = []          # e.g. ["/kaggle/input/anarkali-synth/synth-customer_service", ...]
+SYNTHETIC_MIN_AGREEMENT = 0.99  # with two teachers (generator + 400M): keep a row only when both agree
 STUDENT = "jhu-clsp/ettin-encoder-68m"
 EPOCHS = 3
 MAX_TRAIN_ROWS = 0           # 0 = all; set it when the teacher makes an epoch too slow for the session
@@ -71,10 +75,7 @@ RUN_HELPER_VALUE
 A = ROOT / "artifacts"
 if not (A / "typed-decisions-v2" / "manifest.json").exists():
     run("prepare_typed_decisions.py", "--question-types", "choice,noul,score", "--output", A / "typed-decisions-v2")
-if not (A / "coding-decisions-v0" / "manifest.json").exists():
-    run("generate_coding_decisions.py", "--no-teacher", "--output", A / "coding-decisions-v0")
-BASE = A / "benchmark-decisions"  # typed + coding: its development split selects every epoch
-run("merge_decision_sets.py", "--inputs", A / "typed-decisions-v2", A / "coding-decisions-v0", "--output", BASE)
+BASE = A / "typed-decisions-v2"  # the benchmark: its development split selects every epoch
 
 PUBLIC = A / "public-decisions-v0"
 if not (PUBLIC / "pool" / "manifest.json").exists():
@@ -99,8 +100,19 @@ for name, source in (("gold", PUBLIC / "gold"), ("pool", pool)):
     combined = A / f"public-{name}-combined"
     run("combine_teachers.py", "--input", out, "--output", combined, "--gold-weight", "0.5")
     labelled[name] = combined
+# Generated sets (generate_domain_decisions.py with DeepSeek or another open model): the generator's
+# own labels are one teacher, the 400M is the second, and rows they disagree on are dropped.
+synthetic = []
+for index, source in enumerate(SYNTHETIC_SETS):
+    out = A / f"synthetic-{index}-t400"
+    if not (out / "manifest.json").exists():
+        run("label_with_checkpoint.py", "--checkpoint", TEACHER_CKPT, "--input", source, "--output", out,
+            "--name", "anarkali400m", "--fill-unlabelled", "--device", "cuda", "--batch-size", 64)
+    combined = A / f"synthetic-{index}-combined"
+    run("combine_teachers.py", "--input", out, "--output", combined, "--min-agreement", SYNTHETIC_MIN_AGREEMENT)
+    synthetic.append(combined)
 DATA = A / "distill-decisions-v0"
-run("merge_decision_sets.py", "--inputs", BASE, labelled["gold"], labelled["pool"], "--output", DATA)
+run("merge_decision_sets.py", "--inputs", BASE, labelled["gold"], labelled["pool"], *synthetic, "--output", DATA)
 counts = json.loads((DATA / "manifest.json").read_text())["split_counts"]
 print("Training data:", {k: v["decision_cases"] for k, v in counts.items()}, flush=True)'''
 
@@ -155,7 +167,7 @@ print("WINNER:", WINNER, flush=True)'''
 FINAL_CELL = '''# The test splits are read only here, after WINNER is fixed on development data.
 import hashlib, shutil, zipfile
 reports = {}
-for name, dataset in (("typed", "typed-decisions-v2"), ("coding", "coding-decisions-v0")):
+for name, dataset in (("typed", "typed-decisions-v2"),):
     for model in ok:
         out = RUN / f"eval-{name}-{model}"
         run("evaluate_checkpoint.py", "--checkpoint", Path(ok[model]["dir"]) / "best.pt", "--data", A / dataset,
@@ -174,9 +186,6 @@ release = RUN / "release"
 run("export_onnx.py", "--checkpoint", WINNER_CKPT, "--output", release, "--data", A / "typed-decisions-v2",
     "--name", "anarkali", "--abstain-below", "0.5", *([] if EXPORT_INT8 else ["--no-int8"]),
     *(["--temperature-by-type", json.dumps(typed["temperature_by_type"])] if use_temperatures else []))
-# Real GitHub Actions failures, hand-labelled; never trained on (0.3.0 scored 6.2%).
-run("realworld_benchmark.py", "--cases", ROOT / "benchmarks" / "realworld-ci-v0" / "cases.jsonl",
-    "--model", f"{WINNER}={release}", "--output", RUN / "realworld")
 backup = RUN / "anarkali-distill-backup.zip"
 with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
     for path in release.iterdir():
@@ -184,8 +193,6 @@ with zipfile.ZipFile(backup, "w", zipfile.ZIP_STORED) as z:
     z.write(RUN / "runs.json", "runs.json")
     for (name, model) in reports:
         z.write(RUN / f"eval-{name}-{model}" / "test-report.json", f"eval-{name}-{model}/test-report.json")
-    for path in (RUN / "realworld").glob("report.*"):
-        z.write(path, f"realworld/{path.name}")
     for path in LOGS.glob("*.log"):
         z.write(path, f"logs/{path.name}")
 print("\\nBACKUP:", backup, "sha256", hashlib.sha256(backup.read_bytes()).hexdigest())
@@ -210,7 +217,8 @@ def build(path: Path = OUTPUT) -> Path:
                   "(`coli serve --model-id qwen36`, see its docs/brio.md) and set `BRIO_URL`.\n"
                   "3. Pick a GPU runtime (Kaggle T4 x2 trains the student and the control at once) and **Run All**.\n\n"
                   "Cell 2 selects on the benchmark's development cases only; cell 3 opens the test splits after "
-                  "that and runs the real-world CI cases.\n", "distill-0", "markdown")
+                  "that.\n\nGenerated sets (DeepSeek or another open model, see docs/DATA_AND_DISTILLATION.md) go in "
+                  "`SYNTHETIC_SETS`.\n", "distill-0", "markdown")
     setup = SETUP.replace("RUN_HELPER_VALUE", RUN_HELPER.rstrip() + "\n")
     train = TRAIN.replace("STUDENT_ARGS_VALUE", repr(STUDENT_ARGS)[1:-1]).replace("KD_ARGS_VALUE", repr(KD_ARGS)[1:-1])
     notebook = {"cells": [header, cell(setup, "distill-1"), cell(train, "distill-2"), cell(FINAL_CELL, "distill-3")],

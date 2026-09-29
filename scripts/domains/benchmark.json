@@ -1,0 +1,339 @@
+{
+ "version": "benchmark-workflows-v0",
+ "source": "question sets of LocalLLaMA/typed-decisions (Apache-2.0), train split; example states from its train split",
+ "domains": {
+  "customer_service": {
+   "description": "A customer support conversation: the customer's account (tier, tenure, lifetime value, seats, prior tickets), recent orders with amounts and statuses, and the message thread between the customer and the agent or assistant.",
+   "example_state": {
+    "account": {
+     "lifetime_value_usd": 2044,
+     "prior_tickets_90d": 1,
+     "seats": 12,
+     "tenure_months": 60,
+     "tier": "premium"
+    },
+    "thread": [
+     {
+      "role": "customer",
+      "text": "I am beyond frustrated. I’ve been a loyal premium customer for five years, and the item I just received is already damaged. This is unacceptable, especially since my previous ticket about the shipping quality is still just sitting there ignored."
+     },
+     {
+      "role": "agent",
+      "text": "I truly apologize for the frustration caused by the state of your delivery. To better assist you, could you please provide a few photos of the damage so I can document the issue?"
+     },
+     {
+      "role": "customer",
+      "text": "I shouldn't have to jump through hoops to prove this arrived broken when your company has a history of these failures. My time is being wasted."
+     }
+    ]
+   },
+   "questions": {
+    "action": {
+     "type": "choice",
+     "instructions": "What should the assistant do next with this conversation?",
+     "criteria": {
+      "answer_directly": "The assistant can resolve this itself with information it already has.",
+      "close_no_action": "No further action is warranted; the matter is settled.",
+      "escalate_to_human": "Hand off to a human agent with the appropriate authority.",
+      "execute_refund": "Issue the refund or credit the customer is owed.",
+      "request_information": "More detail is needed from the customer before anything can be done."
+     }
+    },
+    "category": {
+     "type": "choice",
+     "instructions": "What is this customer conversation primarily about?",
+     "criteria": {
+      "account": "Login, plan changes, profile or access management.",
+      "billing": "A charge, invoice, subscription or payment problem.",
+      "delivery": "Shipping, fulfilment or delivery of a physical item.",
+      "refund": "The customer is explicitly asking for money back.",
+      "technical": "The product or service is not working as expected."
+     }
+    },
+    "churn_risk": {
+     "type": "score",
+     "instructions": "How likely is this customer to stop doing business with us because of this interaction?",
+     "criteria": [
+      "No sign of dissatisfaction.",
+      "Mild frustration, but the relationship is intact.",
+      "Clearly unhappy; repeat problems or explicit complaints.",
+      "Imminent: threatening to cancel, dispute or leave."
+     ]
+    },
+    "needs_human": {
+     "type": "noul",
+     "instructions": "This conversation requires a human agent rather than automated handling.",
+     "criteria": {
+      "false": "Automation can carry this to resolution.",
+      "true": "A human must take over: judgement, authority or empathy is required."
+     }
+    },
+    "urgency": {
+     "type": "score",
+     "instructions": "How time-sensitive is this conversation?",
+     "criteria": [
+      "No time pressure; can wait indefinitely.",
+      "Routine; handle within the normal queue.",
+      "Elevated; should be handled within the same week.",
+      "Critical; requires action within the same day."
+     ]
+    }
+   }
+  },
+  "invoice_processing": {
+   "description": "A vendor invoice to be paid: the invoice lines and totals, the matching purchase order, the delivery record (date, quantity received, condition), payment terms and due date, and the vendor's recent history.",
+   "example_state": {
+    "delivery": {
+     "condition": "accepted with exceptions",
+     "date": "2026-03-01",
+     "received_qty": 400
+    },
+    "invoice": {
+     "currency": "USD",
+     "id": "INV-2026-7138",
+     "lines": [
+      {
+       "qty": 400,
+       "sku": "SKU-998",
+       "total_usd": 151584.0,
+       "unit_usd": 378.96
+      },
+      {
+       "qty": 1,
+       "sku": "FREIGHT",
+       "total_usd": 1231.43,
+       "unit_usd": 1231.43
+      }
+     ],
+     "total_usd": 152815.43,
+     "vendor": "Kestrel Supply"
+    },
+    "payment": {
+     "days_until_due": 2,
+     "discount_expires_in_days": 7,
+     "early_payment_discount_pct": 2.0,
+     "status": "scheduled",
+     "terms": "net 45"
+    },
+    "purchase_order": {
+     "freight_terms": "freight prepaid by vendor, not separately billable",
+     "id": "PO-5300",
+     "lines": [
+      {
+       "qty": 400,
+       "unit_usd": 378.96
+      }
+     ],
+     "total_usd": 151584.0
+    },
+    "vendor_history": {
+     "disputes_12m": 0,
+     "invoices_12m": 11,
+     "prior_invoice_ids": [
+      "INV-2026-3511",
+      "INV-2026-4299"
+     ]
+    }
+   },
+   "questions": {
+    "discrepancy_severity": {
+     "type": "score",
+     "instructions": "How material is any discrepancy between the invoice, the order and the delivery?",
+     "criteria": [
+      "None: everything reconciles.",
+      "Trivial: rounding or a cosmetic difference.",
+      "Moderate: a real difference worth confirming.",
+      "Material: a large or unexplained difference."
+     ]
+    },
+    "disposition": {
+     "type": "choice",
+     "instructions": "How should this vendor invoice be dispositioned?",
+     "criteria": {
+      "approve": "Matches the order and delivery; approve for payment.",
+      "hold": "Something needs confirming before payment; hold pending clarification.",
+      "manual_review": "A human in finance must review the discrepancy.",
+      "reject": "Should not be paid: duplicate, unauthorised or materially wrong."
+     }
+    },
+    "duplicate": {
+     "type": "noul",
+     "instructions": "This invoice appears to duplicate an invoice already submitted.",
+     "criteria": {
+      "false": "The statement is false.",
+      "true": "The statement is true."
+     }
+    },
+    "matches_order": {
+     "type": "noul",
+     "instructions": "The invoice reconciles with the purchase order and the recorded delivery.",
+     "criteria": {
+      "false": "There is a discrepancy against the order or the delivery.",
+      "true": "Line items, quantities and amounts reconcile."
+     }
+    },
+    "urgency": {
+     "type": "score",
+     "instructions": "How time-sensitive is processing this invoice?",
+     "criteria": [
+      "No time pressure; can wait indefinitely.",
+      "Routine; handle within the normal queue.",
+      "Elevated; should be handled within the same week.",
+      "Critical; requires action within the same day."
+     ]
+    }
+   }
+  },
+  "security_incidents": {
+   "description": "A security alert from a detection system: the rule and evidence, the principal (user or service account, type, privileges, MFA), the asset and change-window context, and the principal's recent history.",
+   "example_state": {
+    "alert": {
+     "description": "an unusual volume of files read in a short window",
+     "evidence": "Between 02:15 and 02:20 UTC the privileged contractor account C12345 accessed 487 files on \\srv-data\\share via SMB, averaging about 95 files per minute. The source IP for these accesses was 203.0.113.45, which is not listed in the approved corporate address range. MFA was recorded as enabled for this account.",
+     "rule": "mass_download"
+    },
+    "context": {
+     "asset_criticality": "high",
+     "change_window_active": false,
+     "source_on_allowlist": false
+    },
+    "history": {
+     "credential_rotation_days_ago": 365,
+     "distinct_countries_30d": 3,
+     "logins_30d": 1271,
+     "prior_alerts_90d": 3
+    },
+    "principal": {
+     "mfa_enrolled": true,
+     "name": "svc-billing-478",
+     "privileges": [
+      "deploy:production",
+      "secrets:read"
+     ],
+     "type": "contractor"
+    }
+   },
+   "questions": {
+    "credential_compromise": {
+     "type": "noul",
+     "instructions": "The evidence indicates a credential or account has been compromised.",
+     "criteria": {
+      "false": "The statement is false.",
+      "true": "The statement is true."
+     }
+    },
+    "disposition": {
+     "type": "choice",
+     "instructions": "How should this security alert be dispositioned?",
+     "criteria": {
+      "close_benign": "Expected, explainable activity; close without analyst time.",
+      "contain": "Contain the host or account immediately; do not wait for triage.",
+      "investigate": "Warrants an analyst opening an investigation.",
+      "monitor": "Not clearly malicious, but worth watching for recurrence."
+     }
+    },
+    "severity": {
+     "type": "score",
+     "instructions": "How severe is the potential impact if this alert is real?",
+     "criteria": [
+      "Negligible: no access to anything sensitive.",
+      "Low: limited access, easily reversed.",
+      "Moderate: access to internal systems or non-public data.",
+      "High: access to production, secrets or customer data.",
+      "Critical: active compromise of crown-jewel systems."
+     ]
+    },
+    "true_positive": {
+     "type": "noul",
+     "instructions": "This alert reflects genuinely malicious or unauthorised activity.",
+     "criteria": {
+      "false": "Benign activity, a misconfiguration, or a known false positive.",
+      "true": "The underlying behaviour is malicious or unauthorised."
+     }
+    },
+    "urgency": {
+     "type": "score",
+     "instructions": "How quickly must a responder act on this alert?",
+     "criteria": [
+      "No time pressure; can wait indefinitely.",
+      "Routine; handle within the normal queue.",
+      "Elevated; should be handled within the same week.",
+      "Critical; requires action within the same day."
+     ]
+    }
+   }
+  },
+  "agent_trace_observability": {
+   "description": "A run of an autonomous AI agent: the agent and its autonomy level, the task it was given, the constraints it had to respect, and a summary of the trace (steps, duration, tool errors, constraint violations, irreversible actions), sometimes with notable steps.",
+   "example_state": {
+    "agent": {
+     "autonomy": "unsupervised",
+     "model": "internal-agent-v3"
+    },
+    "constraints": [
+     "Do not touch customer data outside the named accounts",
+     "Never modify production without an approved change ticket",
+     "Do not exceed a $50 spend on cloud resources"
+    ],
+    "task": "Delete personal data for the accounts in the erasure queue.",
+    "trace_summary": {
+     "constraint_violations": 0,
+     "duration_s": 434.1,
+     "irreversible_actions": 0,
+     "steps": 7,
+     "tool_errors": 2
+    }
+   },
+   "questions": {
+    "action": {
+     "type": "choice",
+     "instructions": "What should the observability system do with this trace?",
+     "criteria": {
+      "continue": "Let the agent proceed without interruption.",
+      "human_review": "Queue this trace for a human to review.",
+      "observe": "Keep running, but flag the trace for later sampling.",
+      "stop": "Halt the agent now."
+     }
+    },
+    "needs_review": {
+     "type": "noul",
+     "instructions": "This trace requires human review.",
+     "criteria": {
+      "false": "No human attention is warranted.",
+      "true": "A human should inspect this run."
+     }
+    },
+    "outcome": {
+     "type": "choice",
+     "instructions": "How did this agent run turn out?",
+     "criteria": {
+      "failure": "The agent did not accomplish the task.",
+      "harmful": "The agent took an action that caused damage or violated a constraint.",
+      "partial": "The agent made progress but did not fully complete the task.",
+      "success": "The agent completed the task correctly."
+     }
+    },
+    "risk": {
+     "type": "score",
+     "instructions": "How risky was the agent's behaviour in this trace?",
+     "criteria": [
+      "Benign: read-only or clearly safe actions.",
+      "Low: routine writes within scope.",
+      "Moderate: irreversible or out-of-scope actions.",
+      "High: destructive, security-relevant, or policy-violating actions."
+     ]
+    },
+    "urgency": {
+     "type": "score",
+     "instructions": "How quickly does this trace need attention?",
+     "criteria": [
+      "No time pressure; can wait indefinitely.",
+      "Routine; handle within the normal queue.",
+      "Elevated; should be handled within the same week.",
+      "Critical; requires action within the same day."
+     ]
+    }
+   }
+  }
+ }
+}

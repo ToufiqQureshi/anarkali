@@ -46,6 +46,7 @@ class NotebookDistillTests(unittest.TestCase):
             self.assertNotIn("realworld_benchmark.py", early)
             self.assertNotIn("test.jsonl", early)
         self.assertIn("evaluate_checkpoint.py", final)
+        self.assertNotIn("coding-decisions", "\n".join(self.code))  # coding and CI are parked for now
 
     def test_every_flag_exists(self):
         calls = re.findall(r'run\("([a-z_]+\.py)"(.*?)\)\n', "\n".join(self.code), flags=re.S)
@@ -60,6 +61,11 @@ class NotebookDistillTests(unittest.TestCase):
             self.assertIn(flag, train_flags)
         for flag in ("--teacher-checkpoint", "--dev-data", "--max-train-rows"):
             self.assertIn(flag, train_flags)
+
+    def test_synthetic_sets_are_labelled_and_filtered_before_the_merge(self):
+        setup = self.code[0]
+        self.assertIn("SYNTHETIC_SETS = []", setup)
+        self.assertLess(setup.index('"--min-agreement", SYNTHETIC_MIN_AGREEMENT'), setup.index("*synthetic,"))
 
     def test_the_test_split_is_never_teacher_labelled(self):
         setup = self.code[0]

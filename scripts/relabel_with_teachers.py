@@ -315,7 +315,9 @@ def relabel_row(row: dict, teachers: list[Teacher], cache: Cache, *, samples: in
     k = len(row["candidates"])
     votes = {}
     new_row = dict(row)
-    new_row["teacher_targets"], new_row["teacher_position_disagreement"] = {}, {}
+    # Keep teachers from earlier steps (the generator's own labels, a checkpoint's) next to these ones.
+    new_row["teacher_targets"] = dict(row.get("teacher_targets", {}))
+    new_row["teacher_position_disagreement"] = {}
     for teacher in teachers:
         dist, position_gap, sources = teacher_distribution(teacher, row, cache, samples, orders)
         votes[teacher.name] = dist

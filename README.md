@@ -229,11 +229,14 @@ It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) h
 
 ### Distillation: more data, a 400M teacher, a 68M student
 
+Anarkali is a typed + general decision model. [docs/DATA_AND_DISTILLATION.md](docs/DATA_AND_DISTILLATION.md) is the step-by-step guide: the row format, where the data comes from, ten DeepSeek generation runs, and the notebook settings.
+
 The V4 400M model reached 78.7% on typed-decisions but is six times slower than the 68M one. [`notebooks/Anarkali_Distill.ipynb`](notebooks/Anarkali_Distill.ipynb) moves its knowledge into the 68M model.
 - `harvest_public_decisions.py` streams large public datasets into typed decisions. The default is permissive licences only: Civil Comments (CC0), Amazon polarity (Apache-2.0), CLINC150 (CC-BY-3.0), GoEmotions (Apache-2.0), CommonsenseQA (MIT) and deepset prompt-injections (Apache-2.0). Share-alike sets need `--allow-share-alike`.
 - It writes two sets. `gold` holds the datasets' own human labels, soft where raters disagreed. `pool` holds the same texts with in-domain catalog questions for teachers to label.
 - `label_with_checkpoint.py` labels any set with the 400M checkpoint, averaged over option orders.
 - `relabel_with_teachers.py --brio-teacher NAME=MODEL@URL` adds a [colibri](https://github.com/JustVugg/colibri) Brio server as a teacher. It reads option probabilities from a large open model, one request per state.
+- `generate_domain_decisions.py` writes new cases with an open model such as DeepSeek or Qwen, for the four benchmark workflows (`scripts/domains/benchmark.json`) and 20 general domains. Each prompt varies industry, region, tone, length and difficulty, steers toward rare answers, and asks for the generator's own probabilities, which are kept as one teacher.
 - `combine_teachers.py` fits each teacher's temperature on the human-labelled calibration rows, then mixes the teachers with the human label.
 - `train_anarkali.py --teacher-checkpoint` distils online: the student sees the same option order as the teacher (KL at a temperature plus option-vector matching). With `--dev-data`, each epoch is selected on the benchmark's own development cases.
 - The notebook trains a no-teacher control next to the student, so the gain is measured, not assumed. Test splits and the real-world CI cases are opened only after that choice.
