@@ -33,12 +33,17 @@ class PackedHead(nn.Module):
         return self.scorer(pooled).squeeze(-1)
 
 
-def _dict_masks_supported(encoder):
-    """ModernBERT in transformers 5 accepts one attention mask per layer type."""
-    if getattr(encoder.config, 'model_type', None) != 'modernbert':
-        return False
-    import transformers
-    return int(transformers.__version__.split('.')[0]) >= 5
+def _is_modernbert(encoder):
+    return getattr(encoder.config, 'model_type', None) == 'modernbert'
+
+
+def _builds_own_masks(encoder):
+    """Older ModernBERT builds its global and sliding masks from a 2D mask in _update_attention_mask.
+
+    Newer releases drop that method and accept one mask per layer type instead. Checked by
+    behaviour, not version number: some transformers 5 builds (Kaggle's, 2026-09) still have it.
+    """
+    return callable(getattr(encoder, '_update_attention_mask', None))
 
 
 def position_window_masks(encoder, attention_mask, position_ids, dtype):
@@ -77,13 +82,23 @@ class PackedChoiceModel(nn.Module):
         """Token states; with shared positions, ModernBERT also gets position-measured local windows."""
         if position_ids is None:
             return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long()).last_hidden_state
-        if _dict_masks_supported(self.encoder):
+        if _is_modernbert(self.encoder):
             dtype = self.encoder.embeddings.tok_embeddings.weight.dtype
             device_type = input_ids.device.type
             if torch.is_autocast_enabled(device_type):
                 dtype = torch.get_autocast_dtype(device_type)
             masks = position_window_masks(self.encoder, attention_mask, position_ids, dtype)
-            return self.encoder(input_ids=input_ids, attention_mask=masks, position_ids=position_ids).last_hidden_state
+            if not _builds_own_masks(self.encoder):
+                return self.encoder(input_ids=input_ids, attention_mask=masks,
+                                    position_ids=position_ids).last_hidden_state
+            # Older ModernBERT would measure the local window in token index; hand it our masks instead.
+            self.encoder._update_attention_mask = lambda *args, **kwargs: (masks['full_attention'],
+                                                                           masks['sliding_attention'])
+            try:
+                return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long(),
+                                    position_ids=position_ids).last_hidden_state
+            finally:
+                del self.encoder._update_attention_mask
         return self.encoder(input_ids=input_ids, attention_mask=attention_mask.long(),
                             position_ids=position_ids).last_hidden_state
 
