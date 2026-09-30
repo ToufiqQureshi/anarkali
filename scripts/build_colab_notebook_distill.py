@@ -49,6 +49,9 @@ BRIO_MAX_ROWS = 20000        # Brio reads a whole LLM per state: label a sample 
 SYNTHETIC_SETS = []          # e.g. ["/kaggle/input/anarkali-synth/synth-customer_service", ...]
 SYNTHETIC_MIN_AGREEMENT = 0.99  # with two teachers (generator + 400M): keep a row only when both agree
 STUDENT = "jhu-clsp/ettin-encoder-68m"
+# Bigger students distilled the same way, to see what size buys. Each one adds a training run.
+EXTRA_STUDENTS = ["jhu-clsp/ettin-encoder-150m"]  # [] = only the 68M student
+BIGGER_MIN_GAIN = 0.015      # ship a bigger student only if it beats the best 68M run by this much on dev
 EPOCHS = 3
 MAX_TRAIN_ROWS = 0           # 0 = all; set it when the teacher makes an epoch too slow for the session
 TRAIN_CONTROL = True         # the same student without the teacher, to measure what distillation adds
@@ -120,11 +123,19 @@ TRAIN = '''from concurrent.futures import ThreadPoolExecutor
 from huggingface_hub import HfApi
 RUN = A / "distill-run"
 RUN.mkdir(parents=True, exist_ok=True)
-STUDENT_REVISION = HfApi().model_info(STUDENT).sha
-common = [STUDENT_ARGS_VALUE, "--data", DATA, "--dev-data", BASE, "--model", STUDENT,
-          "--revision", STUDENT_REVISION, "--epochs", EPOCHS,
-          *(["--max-train-rows", MAX_TRAIN_ROWS] if MAX_TRAIN_ROWS else [])]
+def student_args(model):
+    return [STUDENT_ARGS_VALUE, "--data", DATA, "--dev-data", BASE, "--model", model,
+            "--revision", HfApi().model_info(model).sha, "--epochs", EPOCHS,
+            *(["--max-train-rows", MAX_TRAIN_ROWS] if MAX_TRAIN_ROWS else [])]
+
+common = student_args(STUDENT)
 jobs = {"distilled": [*common, "--teacher-checkpoint", TEACHER_CKPT, KD_ARGS_VALUE]}
+# Bigger students on all data with the same teacher, named by size (e.g. "distilled-150m").
+BIGGER = {}
+for model in EXTRA_STUDENTS:
+    name = "distilled-" + model.rsplit("-", 1)[-1].lower()
+    jobs[name] = [*student_args(model), "--teacher-checkpoint", TEACHER_CKPT, KD_ARGS_VALUE]
+    BIGGER[name] = model
 # The same teacher on the benchmark data alone: shows whether the public data helps or dilutes.
 base_only = [a for a in common]
 base_only[base_only.index("--data") + 1] = BASE
@@ -158,9 +169,19 @@ ok = {name: r for name, r in results.items() if r["status"] == "ok"}
 if not ok:
     raise RuntimeError("every run failed; see the tracebacks above")
 for name, r in ok.items():
-    print(f"  {name:10s} dev_acc={r['dev_accuracy']:.4f} dev_soft_ce={r['dev_soft_ce']:.4f} (benchmark development)")
+    print(f"  {name:15s} dev_acc={r['dev_accuracy']:.4f} dev_soft_ce={r['dev_soft_ce']:.4f} (benchmark development)")
 # The shipped model is chosen on development data only, before any test split is read.
-WINNER = max(ok, key=lambda name: (ok[name]["dev_accuracy"], -ok[name]["dev_soft_ce"]))
+# A bigger student wins only if it beats the best 68M run by BIGGER_MIN_GAIN: it is slower on CPU.
+def rank(name):
+    return (ok[name]["dev_accuracy"], -ok[name]["dev_soft_ce"])
+
+small = [name for name in ok if name not in BIGGER]
+WINNER = max(small or ok, key=rank)
+for name in sorted((n for n in ok if n in BIGGER), key=rank, reverse=True)[:1]:
+    gain = ok[name]["dev_accuracy"] - ok[WINNER]["dev_accuracy"] if small else 1.0
+    print(f"  {name} vs {WINNER}: {gain:+.4f} dev accuracy (needs {BIGGER_MIN_GAIN:+.4f})", flush=True)
+    if gain >= BIGGER_MIN_GAIN:
+        WINNER = name
 WINNER_CKPT = Path(ok[WINNER]["dir"]) / "best.pt"
 print("WINNER:", WINNER, flush=True)'''
 
@@ -176,7 +197,7 @@ for name, dataset in (("typed", "typed-decisions-v2"),):
 print("\\n=== typed-decisions test (Laya 0.766 | 400M V4 0.787 | Anarkali 0.3.0 0.740 | Jev 0.727) ===")
 for (name, model), report in sorted(reports.items()):
     m = report["test_uncalibrated"]["all"]
-    print(f"  {name:6s} {model:10s} acc={m['accuracy']:.4f} ece={m['ece_15_bins']:.4f} brier={m['brier']:.4f} "
+    print(f"  {name:6s} {model:15s} acc={m['accuracy']:.4f} ece={m['ece_15_bins']:.4f} brier={m['brier']:.4f} "
           f"p50={report['latency']['p50_ms']:.1f}ms")
 typed = reports[("typed", WINNER)]
 raw, cal = typed["development_uncalibrated"], typed["development_calibrated_by_type"]
@@ -218,7 +239,9 @@ def build(path: Path = OUTPUT) -> Path:
                   "3. Pick a GPU runtime (Kaggle T4 x2 trains the student and the control at once) and **Run All**.\n\n"
                   "Cell 2 selects on the benchmark's development cases only; cell 3 opens the test splits after "
                   "that.\n\nGenerated sets (DeepSeek or another open model, see docs/DATA_AND_DISTILLATION.md) go in "
-                  "`SYNTHETIC_SETS`.\n", "distill-0", "markdown")
+                  "`SYNTHETIC_SETS`.\n\n`EXTRA_STUDENTS` also distils Ettin-150M on the same data; it ships only if it "
+                  "beats the best 68M run by `BIGGER_MIN_GAIN` on development data, since it is about twice as "
+                  "slow on CPU.\n", "distill-0", "markdown")
     setup = SETUP.replace("RUN_HELPER_VALUE", RUN_HELPER.rstrip() + "\n")
     train = TRAIN.replace("STUDENT_ARGS_VALUE", repr(STUDENT_ARGS)[1:-1]).replace("KD_ARGS_VALUE", repr(KD_ARGS)[1:-1])
     notebook = {"cells": [header, cell(setup, "distill-1"), cell(train, "distill-2"), cell(FINAL_CELL, "distill-3")],

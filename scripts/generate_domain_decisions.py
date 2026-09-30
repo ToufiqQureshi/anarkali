@@ -57,6 +57,7 @@ from relabel_with_teachers import Teacher, post_chat  # noqa: E402
 
 CATALOG = Path(__file__).resolve().parent / "domains" / "catalog.json"
 BENCHMARK_CATALOG = Path(__file__).resolve().parent / "domains" / "benchmark.json"
+WIDE_CATALOG = Path(__file__).resolve().parent / "domains" / "catalog_wide.json"  # 220 domains, see build_wide_catalog.py
 PROMPT_VERSION = "domain-cases-v1"
 DIFFICULTIES = [
     "clear-cut, where a careful reader reaches the answer quickly",
@@ -241,6 +242,8 @@ def call_plan(name: str, domain: dict, index: int, seed: int, batch: int, attrib
     style, hint = rng.choice(STYLES), rng.randrange(10 ** 6)
     attrs = ({"industry": rng.choice(INDUSTRIES), "region": rng.choice(REGIONS), "size": rng.choice(SIZES),
               "tone": rng.choice(TONES), "length": rng.choice(LENGTHS)} if attributes else {})
+    if attributes:
+        attrs.update(domain.get("attributes", {}))  # a domain may pin some, e.g. GST cases are always in India
     steer = steering(domain, index // len(DIFFICULTIES))
     return {"difficulty": difficulty, "style": style, "attributes": attrs, "steer": steer,
             "prompt": build_prompt(name, domain, batch, difficulty, style, hint, attrs, steer)}

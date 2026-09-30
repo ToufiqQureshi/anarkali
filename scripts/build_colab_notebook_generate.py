@@ -40,6 +40,11 @@ BATCH = 8                      # cases per request
 WORKERS = 16                   # parallel requests; vLLM batches them on the GPU
 MAX_TOKENS = 7000
 # To continue a run from an earlier session, attach its output as a Kaggle dataset and point here:
+# Breadth: the 220 domains of scripts/domains/catalog_wide.json, fewer rows each, into synth/synth-wide.
+# Many tasks with fewer rows generalise better than a few big ones. 600 rows = 200 cases per domain,
+# about 5.5k requests in all: several Kaggle sessions (RESUME_FROM continues where one stopped).
+USE_WIDE_CATALOG = False
+WIDE_ROWS_PER_DOMAIN = 600
 RESUME_FROM = ""               # e.g. "/kaggle/input/anarkali-synth-part1/synth"
 SILENCE_LIMIT_MIN = 45
 
@@ -97,11 +102,18 @@ for domain in DOMAINS:
         "--catalog", ROOT / "scripts" / "domains" / "catalog.json",
         "--domains", domain, "--rows-per-domain", ROWS_PER_DOMAIN, "--batch", BATCH, "--workers", WORKERS,
         "--max-tokens", MAX_TOKENS, "--extra-body", extra, "--output", SYNTH / f"synth-{domain}", tag=domain)
-    print(f"{domain}: {(time.time() - started) / 60:.1f} min", flush=True)'''
+    print(f"{domain}: {(time.time() - started) / 60:.1f} min", flush=True)
+if USE_WIDE_CATALOG:
+    started = time.time()
+    run("generate_domain_decisions.py", "--teacher", f"qwen={MODEL}@http://127.0.0.1:8000/v1",
+        "--catalog", ROOT / "scripts" / "domains" / "catalog_wide.json",
+        "--rows-per-domain", WIDE_ROWS_PER_DOMAIN, "--batch", BATCH, "--workers", WORKERS,
+        "--max-tokens", MAX_TOKENS, "--extra-body", extra, "--output", SYNTH / "synth-wide", tag="wide")
+    print(f"wide catalog: {(time.time() - started) / 60:.1f} min", flush=True)'''
 
 REPORT = '''# Check before using: row counts, how many rows carry the generator's labels, answer balance.
 import zipfile
-for domain in DOMAINS:
+for domain in DOMAINS + (["wide"] if USE_WIDE_CATALOG else []):
     folder = SYNTH / f"synth-{domain}"
     if not (folder / "manifest.json").exists():
         print(f"{domain}: not generated yet")

@@ -17,6 +17,11 @@ same interface as Jev's `/v1/systemone`.
 - **General decisions** means everything else: HR, returns, moderation, fraud, loans, email triage,
   and more. The 20 domains in `scripts/domains/catalog.json` plus the public datasets make the model
   general instead of a benchmark specialist.
+- **Breadth:** `scripts/domains/catalog_wide.json` adds 220 more domains, 10 in each of 22 areas (finance,
+  payments, investing, AI agents, security, support, sales, HR, legal, healthcare admin, e-commerce,
+  logistics, IT, education, public sector, real estate, insurance, telecom, travel, manufacturing,
+  energy, media). Each has one choice, one yes/no and one score question. It is built from
+  `scripts/domains/build_wide_catalog.py`, one line per domain; rebuild after editing it.
 - **Coding and CI data are parked for now.** The scripts stay in the repo (`generate_coding_decisions.py`,
   `import_agent_traces.py`, `realworld_benchmark.py`), but the distillation notebook does not use them.
 
@@ -106,6 +111,12 @@ Run `notebooks/Anarkali_V4.ipynb` with `ONLY_RECIPES = ['bb-ettin-400m']`. Keep
 5. The last cell prints rows per domain, the share with generator labels and the answer balance,
    then zips each domain.
 
+**Breadth run:** set `USE_WIDE_CATALOG = True` to also generate the 220 wide domains into
+`synth/synth-wide`, `WIDE_ROWS_PER_DOMAIN` rows each (600 by default: 200 cases per domain, about 5.5k
+requests). Many tasks with fewer rows each generalise better than a few large tasks (Hsieh et al. 2023;
+the zeroshot-v2.0 classifiers). It takes several Kaggle sessions; `RESUME_FROM` continues it. Attach
+`synth-wide` to the distillation notebook like any other synthetic set.
+
 Qwen3-8B writes somewhat weaker cases than DeepSeek. The 400M agreement filter in step 2 is what
 keeps the bad ones out. Plan on one or two hours per domain on two T4s. That is an estimate, and
 the report cell shows the real rate.
@@ -173,9 +184,18 @@ Then Run All. The notebook:
 | `distilled` | all data + the 400M teacher online | the full recipe |
 | `distilled-base` | typed-decisions only + the teacher | whether the extra data helps or dilutes |
 | `control` | all data, no teacher | what distillation adds |
+| `distilled-150m` | all data + the teacher, on Ettin-150M (`EXTRA_STUDENTS`) | what a bigger student buys |
 
 The winner on development data is evaluated on the typed-decisions test split, exported to ONNX,
-and zipped to `/kaggle/working/anarkali-distill-backup.zip`.
+and zipped to `/kaggle/working/anarkali-distill-backup.zip`. A bigger student wins only if it beats
+the best 68M run by `BIGGER_MIN_GAIN` (1.5 points) on development data, because it is about twice as
+slow on CPU. The test table prints every run's accuracy, ECE and p50 latency side by side.
+
+Why Ettin-150M and not another backbone: at 150M to 230M no public encoder is clearly ahead of the
+ModernBERT/Ettin family on English tasks. LiquidAI's LFM2.5-Encoder-230M leads its own 17-task table
+because of multilingual tasks, but on English MNLI, SST-2 and QNLI it is level with or behind
+ModernBERT-base, its licence stops being free above $10M annual revenue, and its convolution layers
+may not work with the packed shared-position input. Ettin-150M is MIT and drops into the existing code.
 
 ### 3. Decide what to ship
 
@@ -188,11 +208,12 @@ Compare against the published numbers: Laya 76.6%, Anarkali 0.3.0 74.0%, Jev 72.
 ## For AI agents changing this code
 
 - After changing anything in `src/` or `scripts/`, rebuild every notebook before pushing:
-  `python scripts/build_colab_notebook.py && python scripts/build_colab_notebook_v4.py && python scripts/build_colab_notebook_distill.py`.
+  `python scripts/build_colab_notebook.py && python scripts/build_colab_notebook_v4.py && python scripts/build_colab_notebook_distill.py && python scripts/build_colab_notebook_generate.py`.
+  After changing `scripts/domains/build_wide_catalog.py`, run it too: a test checks that `catalog_wide.json` is current.
   The V3 notebook embeds the source, and CI fails when it is stale.
 - Tests: `python -m unittest discover -s tests`. The distillation pipeline is covered by
-  `tests/test_distill_pipeline.py`, `tests/test_synthetic_generation.py`, `tests/test_domain_generation.py`
-  and `tests/test_notebook_distill.py`. Everything runs offline with fakes.
+  `tests/test_distill_pipeline.py`, `tests/test_synthetic_generation.py`, `tests/test_domain_generation.py`,
+  `tests/test_wide_catalog.py`, `tests/test_notebook_generate.py` and `tests/test_notebook_distill.py`. Everything runs offline with fakes.
 - Invariants that tests enforce:
   - no test split is ever labelled or read before the winner is fixed;
   - source groups never cross splits;

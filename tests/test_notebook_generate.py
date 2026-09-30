@@ -46,6 +46,19 @@ class NotebookGenerateTests(unittest.TestCase):
         self.assertTrue(set(self.builder.DOMAINS) <= set(catalog["domains"]))
         self.assertEqual(len(self.builder.DOMAINS), 10)
 
+    def test_wide_catalog_run_is_optional_and_uses_real_flags(self):
+        self.assertIn("USE_WIDE_CATALOG = False", self.code[0])
+        generate = self.code[2]
+        wide = generate[generate.index("if USE_WIDE_CATALOG:"):]
+        self.assertIn('"catalog_wide.json"', wide)
+        self.assertNotIn('"--domains"', wide)  # every wide domain
+        out = subprocess.run([sys.executable, str(REPO / "scripts" / "generate_domain_decisions.py"), "--help"],
+                             capture_output=True, text=True, check=True).stdout
+        flags = set(re.findall(r"--[a-z0-9][a-z0-9-]*", out))
+        for flag in re.findall(r'"(--[a-z0-9-]+)"', wide):
+            self.assertIn(flag, flags)
+        self.assertIn('(["wide"] if USE_WIDE_CATALOG else [])', self.code[3])
+
     def test_outputs_survive_the_session_and_can_resume(self):
         setup = self.code[0]
         self.assertIn('Path("/kaggle/working")', setup)

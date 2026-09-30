@@ -72,6 +72,21 @@ class NotebookDistillTests(unittest.TestCase):
         self.assertIn('"--splits", "train,development,calibration"', setup)
         self.assertNotIn('"--splits", "train,development,calibration,test"', setup)
 
+    def test_a_bigger_student_ships_only_with_a_clear_dev_gain(self):
+        setup, train, _ = self.code
+        self.assertIn('EXTRA_STUDENTS = ["jhu-clsp/ettin-encoder-150m"]', setup)
+        block = train[train.index("def rank(name):"):train.index("WINNER_CKPT")]
+
+        def winner(accuracies):
+            ok = {name: {"dev_accuracy": acc, "dev_soft_ce": 1.0} for name, acc in accuracies.items()}
+            scope = {"ok": ok, "BIGGER": {"distilled-150m": "x"}, "BIGGER_MIN_GAIN": 0.015}
+            exec(block, scope)
+            return scope["WINNER"]
+
+        self.assertEqual(winner({"distilled": 0.760, "control": 0.740, "distilled-150m": 0.770}), "distilled")
+        self.assertEqual(winner({"distilled": 0.760, "control": 0.740, "distilled-150m": 0.780}), "distilled-150m")
+        self.assertEqual(winner({"distilled-150m": 0.700}), "distilled-150m")  # the only run that finished
+
     def test_committed_notebook_is_current(self):
         committed = REPO / "notebooks" / "Anarkali_Distill.ipynb"
         with tempfile.TemporaryDirectory() as tmp:
