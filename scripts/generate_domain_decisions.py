@@ -216,12 +216,13 @@ class ResponseCache:
     def __init__(self, path: Path):
         self.path, self.entries, self.lock = path, {}, threading.Lock()
         if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    entry = json.loads(line)
-                    self.entries[entry["key"]] = entry["text"]
-                except (json.JSONDecodeError, KeyError):
-                    continue
+            with path.open(encoding="utf-8") as stream:
+                for line in stream:
+                    try:
+                        entry = json.loads(line)
+                        self.entries[entry["key"]] = entry["text"]
+                    except (json.JSONDecodeError, KeyError):
+                        continue
         path.parent.mkdir(parents=True, exist_ok=True)
 
     def get_or_call(self, key: str, call) -> str:

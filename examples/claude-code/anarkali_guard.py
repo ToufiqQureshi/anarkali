@@ -103,7 +103,8 @@ def run(event: dict, predict, *, log_dir: Path, deny_at: float, ask_at: float) -
     log = log_dir / "guard-log.jsonl"
     recent = []
     if log.exists():
-        recent = [json.loads(line)["action"] for line in log.read_text(encoding="utf-8").splitlines()[-10:] if line]
+        with log.open(encoding="utf-8") as stream:
+            recent = [json.loads(line)["action"] for line in stream if line.strip()][-10:]
     state = build_state(event, recent, load_constraints(), os.environ.get("ANARKALI_TASK"))
     probability = predict(state)
     log_dir.mkdir(parents=True, exist_ok=True)

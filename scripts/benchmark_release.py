@@ -33,7 +33,8 @@ THRESHOLDS = (0.4, 0.5, 0.6, 0.7)
 
 
 def load_rows(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with path.open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
 
 
 def kind_of(row: dict) -> str:

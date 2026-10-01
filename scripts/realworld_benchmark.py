@@ -31,23 +31,24 @@ from anarkali.workflows.coding import WORKFLOWS  # noqa: E402
 
 def load_cases(path):
     cases = []
-    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
-        case = json.loads(line)
-        questions = WORKFLOWS.get(case.get("workflow"))
-        if questions is None:
-            raise SystemExit(f"line {number}: unknown workflow {case.get('workflow')!r}")
-        for qid, answer in case.get("gold", {}).items():
-            question = questions.get(qid)
-            if question is None:
-                raise SystemExit(f"line {number}: {case['workflow']} has no question {qid!r}")
-            allowed = allowed_answers(question)
-            if answer not in allowed:
-                raise SystemExit(f"line {number}: {qid}={answer!r} is not one of {allowed}")
-        if not case.get("gold"):
-            raise SystemExit(f"line {number}: no gold labels")
-        cases.append(case)
+    with Path(path).open(encoding="utf-8") as stream:
+        for number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            case = json.loads(line)
+            questions = WORKFLOWS.get(case.get("workflow"))
+            if questions is None:
+                raise SystemExit(f"line {number}: unknown workflow {case.get('workflow')!r}")
+            for qid, answer in case.get("gold", {}).items():
+                question = questions.get(qid)
+                if question is None:
+                    raise SystemExit(f"line {number}: {case['workflow']} has no question {qid!r}")
+                allowed = allowed_answers(question)
+                if answer not in allowed:
+                    raise SystemExit(f"line {number}: {qid}={answer!r} is not one of {allowed}")
+            if not case.get("gold"):
+                raise SystemExit(f"line {number}: no gold labels")
+            cases.append(case)
     return cases
 
 

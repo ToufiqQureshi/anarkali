@@ -223,12 +223,13 @@ class Cache:
             with self.path.open("a", encoding="utf-8", newline="\n") as stream:
                 stream.write("\n")
         for path in sorted(directory.glob("*.jsonl")):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    entry = json.loads(line)
-                    self.entries[entry["key"]] = entry
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    continue
+            with path.open(encoding="utf-8") as stream:
+                for line in stream:
+                    try:
+                        entry = json.loads(line)
+                        self.entries[entry["key"]] = entry
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        continue
 
     @staticmethod
     def key(teacher: Teacher, prompt: str, samples: int) -> str:
@@ -337,7 +338,8 @@ def relabel_row(row: dict, teachers: list[Teacher], cache: Cache, *, samples: in
 
 
 def load_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with path.open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
 
 
 def write_jsonl(path: Path, rows: list[dict]):

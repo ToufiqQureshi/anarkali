@@ -29,7 +29,8 @@ def load_script(name):
 
 
 def read_rows(path):
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with path.open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
 
 
 CLINC_NAMES = ["transfer", "balance", "freeze_account", "report_fraud", "pin_change", "oos", "weather", "timer"]
@@ -237,6 +238,28 @@ class MergeTests(unittest.TestCase):
             self.assertNotEqual(bad.returncode, 0)
             self.assertIn("appears in", bad.stderr)
 
+    def test_unicode_line_separator_inside_json_string_is_not_a_record_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            counts = {}
+            for name in SPLITS:
+                rows = [decision("unicode", ["x", "y"], [1.0, 0.0])] if name == "train" else []
+                if rows:
+                    rows[0]["state"] = {"text": "before\u2028after\u2029still one JSON record"}
+                path = source / f"{name}.jsonl"
+                path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+                counts[name] = {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            (source / "manifest.json").write_text(
+                json.dumps({"revision": "unicode", "split_counts": counts}), encoding="utf-8")
+            script = str(REPO / "scripts" / "merge_decision_sets.py")
+            import subprocess
+            result = subprocess.run([sys.executable, script, "--inputs", str(source),
+                                     "--output", str(root / "merged")], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            merged = read_rows(root / "merged" / "train.jsonl")
+            self.assertEqual(merged[0]["state"]["text"], "before\u2028after\u2029still one JSON record")
 
 def tiny_setup(test):
     try:

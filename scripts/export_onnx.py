@@ -30,7 +30,8 @@ def percentile(values: list[float], q: float) -> float:
 
 
 def load_rows(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
-    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with path.open(encoding="utf-8") as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
     return rows if limit is None else rows[:limit]
 
 

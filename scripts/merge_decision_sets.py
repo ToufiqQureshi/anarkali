@@ -32,15 +32,19 @@ def main():
         lines = []
         groups = set()
         for directory in args.inputs:
-            for line in (directory/f'{name}.jsonl').read_text(encoding='utf-8').splitlines():
-                if not line.strip():
-                    continue
-                group = json.loads(line)['source_group']
-                owner = seen_groups.setdefault(group, (directory.name, name))
-                if owner[1] != name:
-                    raise ValueError(f'source group {group} appears in {owner} and {(directory.name, name)}')
-                groups.add(group)
-                lines.append(line)
+            # str.splitlines() also splits at valid JSON characters such as U+2028/U+2029. Public
+            # text can contain those characters inside a quoted string, so consume JSONL only at
+            # its actual CR/LF record boundaries.
+            with (directory/f'{name}.jsonl').open(encoding='utf-8', newline='') as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    group = json.loads(line)['source_group']
+                    owner = seen_groups.setdefault(group, (directory.name, name))
+                    if owner[1] != name:
+                        raise ValueError(f'source group {group} appears in {owner} and {(directory.name, name)}')
+                    groups.add(group)
+                    lines.append(line.rstrip('\r\n'))
         path = args.output/f'{name}.jsonl'
         path.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
         counts[name] = {'decision_cases': len(lines), 'source_groups': len(groups),

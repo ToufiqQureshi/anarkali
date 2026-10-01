@@ -122,8 +122,10 @@ for domain in DOMAINS + (["wide"] if USE_WIDE_CATALOG else []):
     if not (folder / "manifest.json").exists():
         print(f"{domain}: not generated yet")
         continue
-    rows = [json.loads(line) for name in ("train", "development", "calibration", "test")
-            for line in (folder / f"{name}.jsonl").read_text().splitlines()]
+    rows = []
+    for name in ("train", "development", "calibration", "test"):
+        with (folder / f"{name}.jsonl").open(encoding="utf-8") as stream:
+            rows.extend(json.loads(line) for line in stream if line.strip())
     labelled = [r for r in rows if "teacher_targets" in r]
     first_q = rows[0]["case_id"].split("::")[1]
     winners = collections.Counter(
@@ -139,7 +141,8 @@ example = None
 for domain in DOMAINS:
     train = SYNTH / f"synth-{domain}" / "train.jsonl"
     if train.exists() and train.stat().st_size:
-        example = json.loads(train.read_text().splitlines()[0])
+        with train.open(encoding="utf-8") as stream:
+            example = json.loads(next(line for line in stream if line.strip()))
         break
 if example:
     print("\\nOne generated case:\\n", json.dumps(example["state"], indent=1, ensure_ascii=False)[:1500])
