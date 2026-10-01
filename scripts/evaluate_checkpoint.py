@@ -98,6 +98,7 @@ def main():
     p.add_argument('--data', type=Path, default=REPO/'artifacts'/'typed-decisions-v1')
     p.add_argument('--cache', type=Path, default=REPO/'.cache'/'huggingface')
     p.add_argument('--device', default='cpu')
+    p.add_argument('--latency-device', default=None, help='measure latency here after evaluation; default --device')
     p.add_argument('--batch-size', type=int, default=16)
     p.add_argument('--latency-samples', type=int, default=100)
     p.add_argument('--threads', type=int, default=0, help='torch CPU threads; 0 keeps the default')
@@ -163,14 +164,17 @@ def main():
         mean = [(a + b) / 2 for a, b in zip(softmax(original['logits'], 1.0), softmax(rev['logits'][::-1], 1.0))]
         averaged.append(dict(original, logits=[math.log(max(p, 1e-12)) for p in mean]))
 
+    latency_device = torch.device(args.latency_device or args.device)
+    if latency_device != device:
+        model.to(latency_device).eval()
     latencies = []
     with torch.inference_mode():
         sample = test[:args.latency_samples]
         for row in sample[:10]:
-            model(*tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens, shared))[:-1])
+            model(*tuple(v.to(latency_device) for v in collate_packed([row], tokenizer, max_tokens, shared))[:-1])
         for row in sample:
             started = time.perf_counter()
-            values = tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens, shared))
+            values = tuple(v.to(latency_device) for v in collate_packed([row], tokenizer, max_tokens, shared))
             model(*values[:-1]).logits.cpu()  # copy back so GPU timing includes the kernels
             latencies.append((time.perf_counter() - started) * 1000)
     latencies.sort()
@@ -194,7 +198,7 @@ def main():
     report = {
         'checkpoint': str(args.checkpoint), 'checkpoint_sha256': hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
         'model_id': model_id, 'model_revision': revision, 'dataset_revision': manifest['revision'],
-        'parameters': sum(p.numel() for p in model.parameters()),
+        'parameters': sum(p.numel() for p in model.parameters()), 'evaluation_device': str(device),
         'temperature_fitted_on': 'calibration split (source-group disjoint from train/dev/test)',
         'temperature': temperature,
         'temperature_by_type': temperature_by_type,
@@ -206,7 +210,7 @@ def main():
         'development_calibrated_by_type': metrics(with_temperature_by_type(development, temperature_by_type), 1.0)['all'],
         'order_reversal_argmax_change_fraction': flips / len(test),
         'selective_uncalibrated': selective(test, 1.0),
-        'latency': {'device': str(device), 'torch': torch.__version__, 'threads': torch.get_num_threads(),
+        'latency': {'device': str(latency_device), 'torch': torch.__version__, 'threads': torch.get_num_threads(),
                     'batch_size': 1, 'samples': len(latencies), 'includes_tokenization': True,
                     'p50_ms': statistics.median(latencies), 'p95_ms': latencies[int(0.95 * (len(latencies) - 1))]},
     }

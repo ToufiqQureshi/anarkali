@@ -186,10 +186,12 @@ Then Run All. The notebook:
 | `control` | all data, no teacher | what distillation adds |
 | `distilled-150m` | all data + the teacher, on Ettin-150M (`EXTRA_STUDENTS`) | what a bigger student buys |
 
-The winner on development data is evaluated on the typed-decisions test split, exported to ONNX,
-and zipped to `/kaggle/working/anarkali-distill-backup.zip`. A bigger student wins only if it beats
-the best 68M run by `BIGGER_MIN_GAIN` (1.5 points) on development data, because it is about twice as
-slow on CPU. The test table prints every run's accuracy, ECE and p50 latency side by side.
+After the winner is fixed on development data, every successful candidate is evaluated on both the
+2,000-row typed-decisions test and the public human-label held-out test. The latter measures transfer
+beyond the benchmark workflows without using teacher labels. The winner is exported to ONNX and zipped
+to `/kaggle/working/anarkali-distill-backup.zip`. A bigger student wins only if it beats the best 68M
+run by `BIGGER_MIN_GAIN` (1.5 points) on development data, because it is about twice as slow on CPU.
+Both test tables print every run's accuracy, ECE and one-thread CPU p50 latency side by side.
 
 Why Ettin-150M and not another backbone: at 150M to 230M no public encoder is clearly ahead of the
 ModernBERT/Ettin family on English tasks. LiquidAI's LFM2.5-Encoder-230M leads its own 17-task table

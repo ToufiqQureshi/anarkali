@@ -46,6 +46,8 @@ class NotebookDistillTests(unittest.TestCase):
             self.assertNotIn("realworld_benchmark.py", early)
             self.assertNotIn("test.jsonl", early)
         self.assertIn("evaluate_checkpoint.py", final)
+        self.assertIn('"--latency-device", "cpu", "--threads", 1', final)
+        self.assertIn('("general", PUBLIC / "gold")', final)  # held-out human-label generalization
         self.assertNotIn("coding-decisions", "\n".join(self.code))  # coding and CI are parked for now
 
     def test_every_flag_exists(self):

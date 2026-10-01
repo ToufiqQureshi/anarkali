@@ -9,3 +9,4 @@ artifacts/
 checkpoints/
 .env
 .model/
+.kaggle-run/

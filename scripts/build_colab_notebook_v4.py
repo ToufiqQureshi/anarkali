@@ -54,7 +54,7 @@ def cell(source, cell_id, kind="code"):
 
 SETUP = '''# ---- settings ---------------------------------------------------------------------------------
 REPO_URL = "https://github.com/ToufiqQureshi/anarkali"
-REF = "main"                 # branch or tag to train
+REF = "claude/distill-brio-data"  # branch or tag to train; switch to main after merge
 AGENT_TRACES_PER_SOURCE = 0  # e.g. 500 adds real coding-agent steps (needs the Hub; ~10 min)
 EXTRA_SETS = []              # labelled sets you uploaded, e.g. ["/content/domain-decisions-v0-labelled"]
 BACKBONE_BAKEOFF = False     # also train Ettin-150M/400M, ModernBERT-base, mmBERT-small (hours on a T4)

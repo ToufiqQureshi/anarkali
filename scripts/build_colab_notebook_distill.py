@@ -66,7 +66,12 @@ if not torch.cuda.is_available():
 GPUS = torch.cuda.device_count()
 print("GPU:", GPUS, "x", torch.cuda.get_device_name(0), "| python", sys.version.split()[0], flush=True)
 if not Path(TEACHER_CKPT).exists():
-    raise FileNotFoundError(f"TEACHER_CKPT {TEACHER_CKPT} not found: attach the V4 400M checkpoint first")
+    matches = list(Path("/kaggle/input").rglob("bb-ettin-400m-best.pt")) if Path("/kaggle/input").exists() else []
+    if matches:
+        TEACHER_CKPT = str(matches[0])
+        print("Found teacher checkpoint at", TEACHER_CKPT, flush=True)
+    else:
+        raise FileNotFoundError(f"TEACHER_CKPT {TEACHER_CKPT} not found: attach the V4 400M checkpoint first")
 ROOT = Path("/content/anarkali") if Path("/content").exists() else Path.cwd() / "anarkali"
 if not ROOT.exists():
     subprocess.run(["git", "clone", "--depth", "1", "--branch", REF, REPO_URL, str(ROOT)], check=True)
@@ -188,17 +193,22 @@ print("WINNER:", WINNER, flush=True)'''
 FINAL_CELL = '''# The test splits are read only here, after WINNER is fixed on development data.
 import hashlib, shutil, zipfile
 reports = {}
-for name, dataset in (("typed", "typed-decisions-v2"),):
+for name, dataset in (("typed", A / "typed-decisions-v2"), ("general", PUBLIC / "gold")):
     for model in ok:
         out = RUN / f"eval-{name}-{model}"
-        run("evaluate_checkpoint.py", "--checkpoint", Path(ok[model]["dir"]) / "best.pt", "--data", A / dataset,
-            "--device", "cuda", "--skip-revision-check", "--output", out)
+        run("evaluate_checkpoint.py", "--checkpoint", Path(ok[model]["dir"]) / "best.pt", "--data", dataset,
+            "--device", "cuda", "--latency-device", "cpu", "--threads", 1,
+            "--skip-revision-check", "--output", out)
         reports[(name, model)] = json.loads((out / "test-report.json").read_text())
-print("\\n=== typed-decisions test (Laya 0.766 | 400M V4 0.787 | Anarkali 0.3.0 0.740 | Jev 0.727) ===")
-for (name, model), report in sorted(reports.items()):
-    m = report["test_uncalibrated"]["all"]
-    print(f"  {name:6s} {model:15s} acc={m['accuracy']:.4f} ece={m['ece_15_bins']:.4f} brier={m['brier']:.4f} "
-          f"p50={report['latency']['p50_ms']:.1f}ms")
+for benchmark, title in (("typed", "typed-decisions test (Laya 0.766 | 400M V4 0.787 | Anarkali 0.3.0 0.740 | Jev 0.727)"),
+                         ("general", "public human-label held-out test")):
+    print(f"\\n=== {title} ===")
+    for (name, model), report in sorted(reports.items()):
+        if name != benchmark:
+            continue
+        m = report["test_uncalibrated"]["all"]
+        print(f"  {model:15s} n={m['decisions']:6d} acc={m['accuracy']:.4f} ece={m['ece_15_bins']:.4f} "
+              f"brier={m['brier']:.4f} cpu_p50={report['latency']['p50_ms']:.1f}ms")
 typed = reports[("typed", WINNER)]
 raw, cal = typed["development_uncalibrated"], typed["development_calibrated_by_type"]
 use_temperatures = cal["ece_15_bins"] < raw["ece_15_bins"] and cal["soft_ce"] < raw["soft_ce"]
