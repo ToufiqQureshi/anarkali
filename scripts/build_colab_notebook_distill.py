@@ -72,7 +72,11 @@ if not Path(TEACHER_CKPT).exists():
         print("Found teacher checkpoint at", TEACHER_CKPT, flush=True)
     else:
         raise FileNotFoundError(f"TEACHER_CKPT {TEACHER_CKPT} not found: attach the V4 400M checkpoint first")
-ROOT = Path("/content/anarkali") if Path("/content").exists() else Path.cwd() / "anarkali"
+# Kaggle images can also contain /content. Keep intermediate checkpoints under /kaggle/working so
+# a timeout or later-cell failure does not discard hours of completed training.
+ROOT = (Path("/kaggle/working/anarkali") if Path("/kaggle/working").is_dir()
+        else Path("/content/anarkali") if Path("/content").is_dir()
+        else Path.cwd() / "anarkali")
 if not ROOT.exists():
     subprocess.run(["git", "clone", "--depth", "1", "--branch", REF, REPO_URL, str(ROOT)], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", f"{ROOT}[train,onnx]", "datasets", "onnx"],

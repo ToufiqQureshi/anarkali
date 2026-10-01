@@ -55,7 +55,11 @@ if not torch.cuda.is_available():
     raise RuntimeError("Select a GPU runtime (Kaggle: GPU T4 x2), then Run All.")
 GPUS = torch.cuda.device_count()
 print("GPU:", GPUS, "x", torch.cuda.get_device_name(0), flush=True)
-ROOT = Path("/content/anarkali") if Path("/content").exists() else Path.cwd() / "anarkali"
+# Kaggle images can also contain /content. Generated shards must live in /kaggle/working so they
+# remain downloadable if a later domain fails.
+ROOT = (Path("/kaggle/working/anarkali") if Path("/kaggle/working").is_dir()
+        else Path("/content/anarkali") if Path("/content").is_dir()
+        else Path.cwd() / "anarkali")
 if not ROOT.exists():
     subprocess.run(["git", "clone", "--depth", "1", "--branch", REF, REPO_URL, str(ROOT)], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "vllm"], check=True)

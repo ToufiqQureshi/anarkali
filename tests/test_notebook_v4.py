@@ -37,6 +37,11 @@ class NotebookV4Tests(unittest.TestCase):
         for index, source in enumerate(self.code):
             ast.parse(source, filename=f"v4 cell {index}")
 
+    def test_kaggle_outputs_use_the_persistent_working_directory(self):
+        setup = self.code[0]
+        self.assertLess(setup.index('Path("/kaggle/working/anarkali")'),
+                        setup.index('Path("/content/anarkali")'))
+
     def test_final_splits_are_read_only_after_the_winner_is_fixed(self):
         setup, train, final = self.code
         self.assertIn("WINNER =", train)

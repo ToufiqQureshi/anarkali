@@ -31,6 +31,11 @@ class NotebookGenerateTests(unittest.TestCase):
         for index, source in enumerate(self.code):
             ast.parse(source, filename=f"generate cell {index}")
 
+    def test_kaggle_outputs_use_the_persistent_working_directory(self):
+        setup = self.code[0]
+        self.assertLess(setup.index('Path("/kaggle/working/anarkali")'),
+                        setup.index('Path("/content/anarkali")'))
+
     def test_every_generator_flag_exists_and_domains_are_known(self):
         out = subprocess.run([sys.executable, str(REPO / "scripts" / "generate_domain_decisions.py"), "--help"],
                              capture_output=True, text=True, check=True).stdout

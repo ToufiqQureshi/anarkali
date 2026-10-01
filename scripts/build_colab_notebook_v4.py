@@ -69,7 +69,11 @@ if not torch.cuda.is_available():
     raise RuntimeError("Select a GPU (T4) runtime, then Run All.")
 GPUS = torch.cuda.device_count()
 print("GPU:", GPUS, "x", torch.cuda.get_device_name(0), "| python", sys.version.split()[0], flush=True)
-ROOT = Path("/content/anarkali") if Path("/content").exists() else Path.cwd() / "anarkali"
+# Kaggle images can also contain /content. Prefer /kaggle/working there so checkpoints survive
+# notebook termination and are available as kernel outputs; use /content only on Colab.
+ROOT = (Path("/kaggle/working/anarkali") if Path("/kaggle/working").is_dir()
+        else Path("/content/anarkali") if Path("/content").is_dir()
+        else Path.cwd() / "anarkali")
 if not ROOT.exists():
     subprocess.run(["git", "clone", "--depth", "1", "--branch", REF, REPO_URL, str(ROOT)], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", f"{ROOT}[train,onnx]", "datasets", "onnx"],
