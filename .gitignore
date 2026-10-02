@@ -11,3 +11,4 @@ checkpoints/
 .model/
 .kaggle-run/
 results.zip
+anarkali-150m-best.pt
