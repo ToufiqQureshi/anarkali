@@ -10,3 +10,4 @@ checkpoints/
 .env
 .model/
 .kaggle-run/
+results.zip
