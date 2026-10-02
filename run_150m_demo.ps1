@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$python = 'C:\Python314\python.exe'
+$python = Join-Path $root '.venv\Scripts\python.exe'
 $checkpoint = Join-Path $root 'anarkali-150m-best.pt'
 
 if (-not (Test-Path -LiteralPath $python)) {
@@ -20,15 +20,14 @@ if (-not (Test-Path -LiteralPath $checkpoint)) {
     throw "Recovered model was not found at $checkpoint"
 }
 
-try {
-    & $python -c 'import torch, transformers' 2>$null
-    $ready = $LASTEXITCODE -eq 0
-} catch {
-    $ready = $false
-}
+& $python -c 'import torch, transformers' 2>$null
+$ready = $LASTEXITCODE -eq 0
 if (-not $ready) {
     Write-Host 'Installing the model runtime (first run only)...'
     & $python -m pip install --upgrade 'torch>=2.5,<3' 'transformers>=4.48,<6' 'safetensors>=0.4'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Model runtime installation failed.'
+    }
 }
 
 if ($Cpu) {
