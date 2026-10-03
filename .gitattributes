@@ -1,4 +1,4 @@
 * text=auto eol=lf
 *.ipynb text eol=lf
-*.onnx binary
-*.pt binary
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text

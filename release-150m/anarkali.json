@@ -1,0 +1,25 @@
+{
+  "name": "Anarkali 150M",
+  "format": "anarkali-onnx-v1",
+  "max_tokens": 512,
+  "temperature": 1.0,
+  "abstain_below": null,
+  "question_types": [
+    "choice",
+    "noul",
+    "score"
+  ],
+  "tokenizer": {
+    "cls_token_id": 50281,
+    "sep_token_id": 50282,
+    "pad_token_id": 50283,
+    "model_max_length": 8192
+  },
+  "source": {
+    "checkpoint_sha256": "500fe3a34e7ad12b9374103f91cd76578ad0bc0e5cdc175b6eee86f4b70cabf8",
+    "base_model": "jhu-clsp/ettin-encoder-150m",
+    "base_revision": "45d08642849e5c5701b162671ac811b7654bfd9f",
+    "dataset_revision": "92741c297c4ffe49",
+    "parameters": 149114369
+  }
+}
