@@ -67,6 +67,9 @@ class ReleaseBenchmarkTests(unittest.TestCase):
         model = REPO / "release-150m"
         if not model.exists():
             self.skipTest("release-150m is not present")
+        with (model / "model.onnx").open("rb") as handle:
+            if handle.read(64).startswith(b"version https://git-lfs"):
+                self.skipTest("release-150m/model.onnx is a Git LFS pointer; run `git lfs pull`")
         try:
             import numpy  # noqa: F401
             import onnxruntime  # noqa: F401
