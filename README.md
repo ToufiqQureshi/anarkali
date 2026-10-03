@@ -2,14 +2,14 @@
 
 # Anarkali
 
-**A small model that makes typed decisions: fast, calibrated and open.**
+**A compact model that makes typed decisions: fast, calibrated and open.**
 
 Give it a situation, a question and the allowed answers. It returns a probability for every answer in one pass, on a plain CPU.
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Model on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20model-toufiqqureshi651%2Fanarkali-yellow)](https://huggingface.co/toufiqqureshi651/anarkali)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](pyproject.toml)
-![Parameters: 68M](https://img.shields.io/badge/parameters-68M-8A2BE2)
+![Parameters: 150M](https://img.shields.io/badge/parameters-150M-8A2BE2)
 
 <img src="assets/anarkali-demo.gif" alt="Anarkali routes a support ticket, then its benchmark against Laya and Jev" width="800">
 
@@ -21,14 +21,44 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 
 ## Why Anarkali
 
-- **More accurate than Jev** on the public typed-decisions benchmark (74.0% vs 72.7%), and **within 2.6 points of Laya** at a sixth of Laya's size.
-- **Honest confidence.** Lowest calibration error of the three (ECE 0.135): its probabilities track how often it is actually right more closely than Laya's or Jev's.
+- **Ships with a local 150M ONNX release.** `release-150m/` contains the graph, tokenizer and config needed for CPU inference.
+- **More accurate than Jev** on the public typed-decisions benchmark in the 0.3.0 68M baseline (74.0% vs 72.7%), and the current repo now includes the 150M release path and a hard routing benchmark for further iteration.
+- **Honest confidence.** The project optimizes calibration and selective accuracy, not just top-1 accuracy.
 - **Knows when to stay quiet.** Every answer carries an `abstain` flag. Answers above 0.7 probability are right 94.8% of the time.
 - **Drop-in API.** Speaks the `/v1/systemone` format used by Jev and Laya: point an existing client at a new URL.
-- **Runs anywhere.** A single 273 MB ONNX file. About 110 ms per decision on a laptop CPU and 14 ms on a T4 GPU. No PyTorch needed to serve.
+- **Runs anywhere.** The released 150M ONNX graphs run without PyTorch. Large ONNX files are stored with Git LFS.
 - **Coding decisions built in.** CI failure triage, PR review triage and agent-step checks.
 
-## Benchmark
+## Benchmarks
+
+### Current 150M release smoke / hard routing suite
+
+This repository includes a local ONNX release at [`release-150m/`](release-150m/) and a targeted routing benchmark at [`benchmarks/anarkali-routing-v1/cases.jsonl`](benchmarks/anarkali-routing-v1/cases.jsonl).
+
+Current local result:
+
+```text
+32 hard routing cases
+24 correct
+75.0% accuracy
+```
+
+Run it with:
+
+```bash
+python scripts/evaluate_release_suite.py --model release-150m \
+  --cases benchmarks/anarkali-routing-v1/cases.jsonl --min-accuracy 0.60
+```
+
+The hard suite focuses on the failure modes that matter most for improvement:
+
+- one-customer product issue vs widespread incident
+- product vs identity near-ties
+- billing vs product entitlement confusion
+- security vs identity edge cases
+- temporal traps and long-context signal burial
+
+### Public typed-decisions benchmark
 
 2,000 held-out decisions from [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (revision `468b146`). The model was chosen on development data before the test split was opened.
 
@@ -38,7 +68,7 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 | **Anarkali** | **68M** | 74.0% | **0.135** | ✅ |
 | Jev 1.13.0 | undisclosed | 72.7% | 0.144 | ❌ API only |
 
-<sub>Laya and Jev figures are published by the Laya project; we did not run them. Laya and Anarkali are fine-tuned on this dataset, Jev is a general model. The dataset's own labelling teacher agrees with itself 73.5% of the time, so scores far above that fit its quirks rather than the task.</sub>
+<sub>This table describes the published 0.3.0 68M baseline. Laya and Jev figures are published by the Laya project; we did not run them. Laya and Anarkali are fine-tuned on this dataset, Jev is a general model. The dataset's own labelling teacher agrees with itself 73.5% of the time, so scores far above that fit its quirks rather than the task.</sub>
 
 <details>
 <summary><b>Breakdown by question type and workflow</b></summary>
@@ -74,6 +104,8 @@ pip install "anarkali[onnx] @ git+https://github.com/ToufiqQureshi/anarkali"
 from anarkali import Engine
 
 engine = Engine.load("toufiqqureshi651/anarkali")   # downloads once, runs on CPU
+# Or use the checked-in local release:
+# engine = Engine.load("release-150m")
 
 result = engine.predict(
     state={
@@ -111,13 +143,15 @@ For `noul`, describe what true and false mean in `criteria`, as above. Without i
 
 ```bash
 anarkali decide --model toufiqqureshi651/anarkali --request examples/requests/support_routing.json
+# or, from a cloned repo:
+python -m anarkali decide --model release-150m --request examples/requests/support_routing.json
 ```
 
 ### As a Jev-compatible server
 
 ```bash
 pip install "anarkali[serve] @ git+https://github.com/ToufiqQureshi/anarkali"
-anarkali serve --model toufiqqureshi651/anarkali --port 8000
+anarkali serve --model release-150m --port 8000
 curl -s localhost:8000/v1/systemone -d @examples/requests/support_routing.json
 ```
 
@@ -182,7 +216,7 @@ python scripts/generate_coding_decisions.py --no-teacher
 python scripts/merge_decision_sets.py
 ```
 
-Then open [`notebooks/Anarkali_V3.ipynb`](notebooks/Anarkali_V3.ipynb) on a Colab T4 and press **Run All**. It trains the backbones, picks the winner on development data, evaluates it and writes a backup ZIP (about 30 minutes).
+Then open [`notebooks/Anarkali_V3.ipynb`](notebooks/Anarkali_V3.ipynb) or [`notebooks/Anarkali_V4.ipynb`](notebooks/Anarkali_V4.ipynb) on a Colab/Kaggle T4 and press **Run All**. The notebooks train, pick on development data, evaluate, and export ONNX.
 
 ```bash
 python scripts/evaluate_checkpoint.py --checkpoint best.pt --data artifacts/typed-decisions-v2 --output eval
@@ -192,6 +226,12 @@ python scripts/export_onnx.py --checkpoint best.pt --output release
 The export only ships a graph that matches PyTorch on 200 development decisions (0 changed answers for the released fp32 model; every int8 variant failed and was dropped).
 
 Tests: `python -m unittest discover -s tests`
+
+Release benchmark tests:
+
+```bash
+python -m pytest tests/test_release_benchmark.py
+```
 
 ### Relabel with open teachers
 
