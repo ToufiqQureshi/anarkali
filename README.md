@@ -32,6 +32,8 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 
 ## Benchmarks
 
+For an honest quality/use-case assessment, see the [150M model card](docs/MODEL_CARD_150M.md).
+
 ### Releases
 
 | Release | Backbone | Parameters | Where | Status |
