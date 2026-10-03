@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from .packing import pack_row, shared_option_positions
-from .typed import MAX_OPTIONS, format_answer, question_candidates, softmax
+from .typed import MAX_OPTIONS, format_answer, question_candidates, softmax, validate_state
 
 MAX_QUESTIONS = 64
 MAX_STATE_CHARS = 50_000
@@ -203,8 +203,7 @@ class Engine:
             raise ValueError("'questions' must be a non-empty object")
         if len(questions) > MAX_QUESTIONS:
             raise ValueError(f"too many questions ({len(questions)} > {MAX_QUESTIONS})")
-        if len(state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)) > MAX_STATE_CHARS:
-            raise ValueError(f"state longer than {MAX_STATE_CHARS} characters")
+        validate_state(state, max_chars=MAX_STATE_CHARS)
         started = time.perf_counter()
         parsed, items = [], []
         for qid, question in questions.items():

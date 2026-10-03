@@ -5,6 +5,7 @@ training rows were. Importing this module does not load torch.
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -14,11 +15,40 @@ DEFAULT_NOUL_CRITERIA = {"false": "The statement is false.", "true": "The statem
 MAX_OPTIONS = 255
 
 
+def validate_state(state: Any, *, max_chars: int = 50_000) -> Any:
+    """Validate a Jev/Laya-style state payload is JSON-serializable and within limits."""
+    if state is None:
+        return state
+    if isinstance(state, str):
+        if len(state) > max_chars:
+            raise ValueError(f"state longer than {max_chars} characters")
+        return state
+    try:
+        encoded = json.dumps(state, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive validation path
+        raise ValueError("state must be a JSON-serializable object or primitive") from exc
+    if len(encoded) > max_chars:
+        raise ValueError(f"state longer than {max_chars} characters")
+    return state
+
+
+def validate_question(question: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a Jev/Laya-style question into a strict, validated schema."""
+    kind, text, candidates = question_candidates(question)
+    normalized = {"type": kind, "instructions": text, "criteria": {c["id"]: c["text"] for c in candidates}}
+    if kind == "score":
+        normalized["criteria"] = [c["text"] for c in candidates]
+    return normalized
+
+
 def question_candidates(question: dict[str, Any]) -> tuple[str, str, list[dict[str, str]]]:
     """Return (type, packed question text, candidates) for one Jev-style question object."""
     if not isinstance(question, dict):
         raise ValueError("question must be an object")
     kind = question.get("type", "choice")
+    if not isinstance(kind, str):
+        raise ValueError("question type must be a string")
+    kind = kind.strip().lower()
     if kind not in QUESTION_TYPES:
         raise ValueError(f"unsupported question type {kind!r}; use choice, noul or score")
     instructions = question.get("instructions")
@@ -28,6 +58,8 @@ def question_candidates(question: dict[str, Any]) -> tuple[str, str, list[dict[s
     if kind == "score":
         if not isinstance(criteria, list) or not 2 <= len(criteria) <= 10:
             raise ValueError("score criteria must be a list of 2-10 level descriptions")
+        if any(not isinstance(level, str) or not level.strip() for level in criteria):
+            raise ValueError("score criteria must contain only non-empty strings")
         criteria = {str(level): text for level, text in enumerate(criteria)}
     elif kind == "noul":
         if criteria is None:
