@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import unittest
 
@@ -6,18 +7,24 @@ from anarkali.typed import question_candidates
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE = ROOT / "artifacts" / "release" / "anarkali-lite-v4"
+RELEASE = Path(os.environ.get("ANARKALI_RELEASE_DIR", ROOT / "artifacts" / "release" / "anarkali-lite-v4"))
+# CI sets this so a missing or broken release model fails instead of silently skipping.
+REQUIRE_RELEASE = os.environ.get("ANARKALI_REQUIRE_RELEASE") == "1"
 CHECKPOINT = ROOT / "artifacts" / "lite-20260928-063656" / "best.pt"
 DEV_ROWS = ROOT / "artifacts" / "typed-decisions-v1" / "development.jsonl"
 
 
 def load_release_engine():
     if not RELEASE.exists():
+        if REQUIRE_RELEASE:
+            raise AssertionError(f"release directory is missing: {RELEASE}")
         raise unittest.SkipTest("release directory is missing")
     try:
         from anarkali.engine import Engine
         return Engine.load(RELEASE)
     except Exception as exc:
+        if REQUIRE_RELEASE:
+            raise
         raise unittest.SkipTest(f"release engine unavailable: {exc}") from exc
 
 
@@ -87,6 +94,10 @@ class EngineShapeHelperTests(unittest.TestCase):
 
 class ResolveTests(unittest.TestCase):
     def test_local_paths_stay_local_and_repo_ids_download(self):
+        try:
+            import huggingface_hub  # noqa: F401
+        except ImportError:
+            self.skipTest("huggingface_hub not installed (pip install '.[onnx]')")
         from unittest.mock import patch
         from anarkali.engine import _resolve
         self.assertEqual(_resolve(ROOT, None), ROOT)

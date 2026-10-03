@@ -36,6 +36,20 @@ def fit_temperature(rows):
     return min(grid, key=lambda t: sum(soft_ce(r['logits'], r['target'], t) for r in rows))
 
 
+def fit_temperature_by_type(rows):
+    """One temperature per question type, fitted on held-out rows."""
+    by_type = defaultdict(list)
+    for r in rows:
+        by_type[r.get('question_type', 'choice')].append(r)
+    return {kind: fit_temperature(part) for kind, part in sorted(by_type.items())}
+
+
+def with_temperature_by_type(rows, temperatures):
+    """Rows whose logits are pre-divided by their type's temperature, for metrics(rows, 1.0)."""
+    return [dict(r, logits=[x / temperatures.get(r.get('question_type', 'choice'), 1.0) for x in r['logits']])
+            for r in rows]
+
+
 def metrics(rows, temperature):
     out = defaultdict(lambda: {'n': 0, 'correct': 0, 'ce': 0.0, 'brier': 0.0, 'conf': [], 'hit': []})
     for r in rows:
@@ -84,6 +98,7 @@ def main():
     p.add_argument('--data', type=Path, default=REPO/'artifacts'/'typed-decisions-v1')
     p.add_argument('--cache', type=Path, default=REPO/'.cache'/'huggingface')
     p.add_argument('--device', default='cpu')
+    p.add_argument('--latency-device', default=None, help='measure latency here after evaluation; default --device')
     p.add_argument('--batch-size', type=int, default=16)
     p.add_argument('--latency-samples', type=int, default=100)
     p.add_argument('--threads', type=int, default=0, help='torch CPU threads; 0 keeps the default')
@@ -112,7 +127,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision, cache_dir=str(args.cache))
     encoder = AutoModel.from_config(AutoConfig.from_pretrained(model_id, revision=revision, cache_dir=str(args.cache)))
     head = checkpoint['head_config']
-    model = PackedChoiceModel(encoder, hidden_dim=head['hidden_dim'], dropout=head['dropout'])
+    shared = head.get('shared_option_positions', False)
+    model = PackedChoiceModel(encoder, hidden_dim=head['hidden_dim'], dropout=head['dropout'],
+                              shared_option_positions=shared)
     model.load_state_dict(checkpoint['state_dict'], strict=True)
     model.to(device).eval()
     max_tokens = config.get('packed_max_tokens', 512)
@@ -122,7 +139,7 @@ def main():
         with torch.inference_mode():
             for start in range(0, len(rows), args.batch_size):
                 part = rows[start:start+args.batch_size]
-                values = tuple(v.to(device) for v in collate_packed(part, tokenizer, max_tokens))
+                values = tuple(v.to(device) for v in collate_packed(part, tokenizer, max_tokens, shared))
                 logits = model(*values[:-1]).logits.float().cpu().tolist()
                 for row, row_logits in zip(part, logits):
                     n = len(row['candidates'])
@@ -131,24 +148,33 @@ def main():
 
     calibration = score(load_rows(args.data/'calibration.jsonl'))
     temperature = fit_temperature(calibration)
+    temperature_by_type = fit_temperature_by_type(calibration)
+    # Held out from the temperature fit, so a release can decide on temperatures without the test split.
+    development = score(load_rows(args.data/'development.jsonl'))
     test_rows = load_rows(args.data/'test.jsonl')
     test = score(test_rows)
     reversed_rows = [dict(r, candidates=r['candidates'][::-1], target=r['target'][::-1]) for r in test_rows]
     flips = 0
+    averaged = []  # original and reversed order averaged: the engine's orders=2 for two options
     for original, rev in zip(test, score(reversed_rows)):
         ids = [c['id'] for c in original['candidates']]
         rev_ids = [c['id'] for c in rev['candidates']]
         flips += (ids[max(range(len(ids)), key=original['logits'].__getitem__)]
                   != rev_ids[max(range(len(rev_ids)), key=rev['logits'].__getitem__)])
+        mean = [(a + b) / 2 for a, b in zip(softmax(original['logits'], 1.0), softmax(rev['logits'][::-1], 1.0))]
+        averaged.append(dict(original, logits=[math.log(max(p, 1e-12)) for p in mean]))
 
+    latency_device = torch.device(args.latency_device or args.device)
+    if latency_device != device:
+        model.to(latency_device).eval()
     latencies = []
     with torch.inference_mode():
         sample = test[:args.latency_samples]
         for row in sample[:10]:
-            model(*tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens))[:-1])
+            model(*tuple(v.to(latency_device) for v in collate_packed([row], tokenizer, max_tokens, shared))[:-1])
         for row in sample:
             started = time.perf_counter()
-            values = tuple(v.to(device) for v in collate_packed([row], tokenizer, max_tokens))
+            values = tuple(v.to(latency_device) for v in collate_packed([row], tokenizer, max_tokens, shared))
             model(*values[:-1]).logits.cpu()  # copy back so GPU timing includes the kernels
             latencies.append((time.perf_counter() - started) * 1000)
     latencies.sort()
@@ -172,14 +198,19 @@ def main():
     report = {
         'checkpoint': str(args.checkpoint), 'checkpoint_sha256': hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
         'model_id': model_id, 'model_revision': revision, 'dataset_revision': manifest['revision'],
-        'parameters': sum(p.numel() for p in model.parameters()),
+        'parameters': sum(p.numel() for p in model.parameters()), 'evaluation_device': str(device),
         'temperature_fitted_on': 'calibration split (source-group disjoint from train/dev/test)',
         'temperature': temperature,
+        'temperature_by_type': temperature_by_type,
         'test_uncalibrated': metrics(test, 1.0), 'test_calibrated': metrics(test, temperature),
+        'test_calibrated_by_type': metrics(with_temperature_by_type(test, temperature_by_type), 1.0),
+        'test_order_averaged_uncalibrated': metrics(averaged, 1.0),
         'calibration_uncalibrated': metrics(calibration, 1.0)['all'],
+        'development_uncalibrated': metrics(development, 1.0)['all'],
+        'development_calibrated_by_type': metrics(with_temperature_by_type(development, temperature_by_type), 1.0)['all'],
         'order_reversal_argmax_change_fraction': flips / len(test),
         'selective_uncalibrated': selective(test, 1.0),
-        'latency': {'device': str(device), 'torch': torch.__version__, 'threads': torch.get_num_threads(),
+        'latency': {'device': str(latency_device), 'torch': torch.__version__, 'threads': torch.get_num_threads(),
                     'batch_size': 1, 'samples': len(latencies), 'includes_tokenization': True,
                     'p50_ms': statistics.median(latencies), 'p95_ms': latencies[int(0.95 * (len(latencies) - 1))]},
     }

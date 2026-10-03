@@ -1,0 +1,60 @@
+name: Benchmark
+
+# Scores the released model on the typed-decisions test split under inference variants.
+# Per-type temperatures are fitted on the calibration split only.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "released model directory or Hugging Face repo id"
+        default: "toufiqqureshi651/anarkali"
+      variants:
+        description: "space-separated variants, e.g. orders=1 orders=3 orders=1,max_tokens=1024"
+        default: "orders=1 orders=2 orders=3 orders=1,max_tokens=1024"
+  pull_request:
+    paths:
+      - src/anarkali/engine.py
+      - src/anarkali/packing.py
+      - scripts/benchmark_release.py
+      - .github/workflows/benchmark.yml
+
+permissions:
+  contents: read
+
+# A newer push replaces a running benchmark instead of queueing beside it.
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      VARIANTS: ${{ github.event.inputs.variants || 'orders=1 orders=2 orders=3 orders=1,max_tokens=1024' }}
+      MODEL: ${{ github.event.inputs.model || 'toufiqqureshi651/anarkali' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[onnx]" datasets
+      - name: Cache Hugging Face downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            .cache
+          key: hf-${{ hashFiles('scripts/prepare_typed_decisions.py') }}-anarkali
+      - name: Prepare typed-decisions (pinned revision)
+        run: python scripts/prepare_typed_decisions.py --question-types choice,noul,score --output artifacts/typed-decisions-v2
+      - name: Benchmark
+        run: |
+          python scripts/benchmark_release.py --model "$MODEL" \
+            --data artifacts/typed-decisions-v2 --output artifacts/benchmark --variants $VARIANTS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark
+          path: artifacts/benchmark/

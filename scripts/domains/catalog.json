@@ -1,0 +1,300 @@
+{
+  "version": "domains-v0",
+  "domains": {
+    "hr_candidate_screen": {
+      "description": "An applicant's CV summary, the job requirements and recruiter notes for a single opening.",
+      "questions": {
+        "next_step": {"type": "choice", "instructions": "What should the recruiter do next with this applicant?",
+          "criteria": {"advance_to_interview": "The applicant meets the must-have requirements; schedule an interview.",
+                       "request_more_info": "Key facts are missing or unclear; ask the applicant before deciding.",
+                       "reject": "The applicant clearly misses a must-have requirement.",
+                       "refer_other_role": "Not a fit for this role but a good fit for another open role."}},
+        "meets_must_haves": {"type": "noul", "instructions": "The applicant meets every must-have requirement of the role.",
+          "criteria": {"false": "At least one must-have requirement is missing or unproven.",
+                       "true": "Every must-have requirement is met and evidenced."}},
+        "fit": {"type": "score", "instructions": "Overall fit for the role. Levels: 0 poor, 1 weak, 2 good, 3 excellent.",
+          "criteria": ["Poor: misses core requirements.", "Weak: some overlap but major gaps.",
+                       "Good: meets requirements with minor gaps.", "Excellent: exceeds requirements."]}
+      }
+    },
+    "content_moderation": {
+      "description": "A user post or comment on a public platform, with the platform's rules and the author's history.",
+      "questions": {
+        "action": {"type": "choice", "instructions": "What moderation action should be taken on this post?",
+          "criteria": {"allow": "The post follows the rules; leave it up.",
+                       "label": "Allowed but needs a context or sensitivity label.",
+                       "remove": "The post breaks a rule and must come down.",
+                       "escalate": "Possible imminent harm or legal issue; send to a specialist team now."}},
+        "breaks_rules": {"type": "noul", "instructions": "The post breaks at least one of the stated platform rules.",
+          "criteria": {"false": "No stated rule is broken.", "true": "At least one stated rule is broken."}},
+        "severity": {"type": "score", "instructions": "How harmful is the post? Levels: 0 none, 1 low, 2 moderate, 3 severe.",
+          "criteria": ["None: harmless.", "Low: rude or off-topic.", "Moderate: harassment, misinformation or spam at scale.",
+                       "Severe: threats, exploitation or incitement."]}
+      }
+    },
+    "insurance_claim": {
+      "description": "An insurance claim with policy terms, the incident description, documents received and prior claims.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "How should this claim be handled?",
+          "criteria": {"approve": "Covered by the policy and fully documented; pay it.",
+                       "request_documents": "Probably covered but required documents are missing.",
+                       "deny": "Not covered by the policy terms.",
+                       "investigate_fraud": "Signals of fraud warrant a special investigation before any payment."}},
+        "covered": {"type": "noul", "instructions": "The incident is covered by the policy terms as written.",
+          "criteria": {"false": "An exclusion applies or the incident is outside the cover.",
+                       "true": "The incident falls within the cover and no exclusion applies."}},
+        "fraud_risk": {"type": "score", "instructions": "Fraud risk. Levels: 0 none, 1 low, 2 elevated, 3 high.",
+          "criteria": ["None: consistent and well documented.", "Low: minor inconsistencies.",
+                       "Elevated: several red flags such as timing or amounts.", "High: strong evidence of fabrication."]}
+      }
+    },
+    "loan_application": {
+      "description": "A small-business or personal loan application with income, obligations, credit summary and the lender's policy.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "What should the underwriter decide?",
+          "criteria": {"approve": "Meets policy with comfortable margins.",
+                       "approve_with_conditions": "Approvable if a condition is added, such as a guarantor or lower amount.",
+                       "decline": "Fails a hard policy rule or affordability.",
+                       "manual_review": "Unusual profile; a senior underwriter must review."}},
+        "affordable": {"type": "noul", "instructions": "The applicant can afford the repayments under the lender's stated affordability rule.",
+          "criteria": {"false": "Repayments exceed the affordability limit.", "true": "Repayments are within the affordability limit."}},
+        "risk": {"type": "score", "instructions": "Credit risk. Levels: 0 low, 1 moderate, 2 high, 3 very high.",
+          "criteria": ["Low: strong history and margins.", "Moderate: some weaknesses offset by strengths.",
+                       "High: thin margins or recent delinquencies.", "Very high: defaults or unverifiable income."]}
+      }
+    },
+    "patient_message_triage": {
+      "description": "An administrative triage of a patient's portal message at a clinic, with the clinic's routing protocol. Routing only, no diagnosis.",
+      "questions": {
+        "route": {"type": "choice", "instructions": "Where should the clinic route this patient message under its protocol?",
+          "criteria": {"emergency_advice": "The protocol lists these symptoms as emergencies; tell the patient to call emergency services now.",
+                       "nurse_same_day": "A nurse should call back today.",
+                       "doctor_routine": "Queue for the doctor within a few days.",
+                       "admin_desk": "Scheduling, billing or records request; no clinical content."}},
+        "has_red_flag": {"type": "noul", "instructions": "The message mentions a symptom the protocol lists as a red flag.",
+          "criteria": {"false": "No listed red-flag symptom is mentioned.", "true": "At least one listed red-flag symptom is mentioned."}},
+        "urgency": {"type": "score", "instructions": "Urgency under the protocol. Levels: 0 routine, 1 soon, 2 same day, 3 immediate.",
+          "criteria": ["Routine: can wait a week or more.", "Soon: within a few days.", "Same day: needs contact today.",
+                       "Immediate: emergency instructions now."]}
+      }
+    },
+    "ecommerce_return": {
+      "description": "A customer's return or refund request with the order, delivery record, product condition and the store's return policy.",
+      "questions": {
+        "resolution": {"type": "choice", "instructions": "How should the return request be resolved?",
+          "criteria": {"full_refund": "Eligible under policy; refund in full.",
+                       "partial_refund": "Eligible but with a deduction, such as for use or missing parts.",
+                       "replacement": "The customer wants, and is eligible for, a replacement.",
+                       "decline": "Outside the policy window or conditions."}},
+        "within_policy": {"type": "noul", "instructions": "The request is within the store's return window and conditions.",
+          "criteria": {"false": "Outside the window or a condition is not met.", "true": "Within the window and every condition is met."}},
+        "abuse_risk": {"type": "score", "instructions": "Return-abuse risk. Levels: 0 none, 1 low, 2 elevated, 3 high.",
+          "criteria": ["None.", "Low: first return, plausible story.", "Elevated: frequent returns or inconsistent details.",
+                       "High: pattern of wardrobing or empty-box claims."]}
+      }
+    },
+    "payment_fraud": {
+      "description": "A card or wallet transaction with device, location, merchant and the account's recent history.",
+      "questions": {
+        "action": {"type": "choice", "instructions": "What should the fraud system do with this transaction?",
+          "criteria": {"approve": "Consistent with the account's normal behaviour.",
+                       "step_up_auth": "Ask the customer for extra verification before approving.",
+                       "decline": "Likely fraudulent; block it.",
+                       "hold_for_review": "Hold and send to an analyst."}},
+        "account_takeover_signs": {"type": "noul", "instructions": "There are signs the account has been taken over.",
+          "criteria": {"false": "No takeover signals such as new device plus password reset plus address change.",
+                       "true": "Takeover signals are present."}},
+        "risk": {"type": "score", "instructions": "Fraud risk. Levels: 0 low, 1 guarded, 2 high, 3 critical.",
+          "criteria": ["Low.", "Guarded: one unusual attribute.", "High: several unusual attributes together.",
+                       "Critical: matches a known fraud pattern."]}
+      }
+    },
+    "contract_clause_review": {
+      "description": "A clause from a commercial contract under negotiation, with the company's legal playbook positions.",
+      "questions": {
+        "position": {"type": "choice", "instructions": "How should the reviewer respond to this clause under the playbook?",
+          "criteria": {"accept": "Matches the playbook's preferred or acceptable position.",
+                       "redline": "Propose the playbook's fallback wording.",
+                       "escalate_to_counsel": "Outside every playbook position; counsel must decide.",
+                       "reject": "A position the playbook says never to accept."}},
+        "deviates_from_playbook": {"type": "noul", "instructions": "The clause deviates from the playbook's acceptable positions.",
+          "criteria": {"false": "Within an acceptable position.", "true": "Outside every acceptable position."}},
+        "exposure": {"type": "score", "instructions": "Legal or financial exposure. Levels: 0 none, 1 low, 2 material, 3 severe.",
+          "criteria": ["None.", "Low: minor or capped.", "Material: uncapped in a narrow area or costly.",
+                       "Severe: unlimited liability, IP loss or regulatory breach."]}
+      }
+    },
+    "it_helpdesk": {
+      "description": "An internal IT support ticket with the employee's device, role, error details and recent changes.",
+      "questions": {
+        "route": {"type": "choice", "instructions": "Which team should handle this ticket?",
+          "criteria": {"self_service": "A documented self-service fix exists; send the article.",
+                       "service_desk": "Tier-1 service desk can resolve it.",
+                       "infrastructure": "Network, server or identity infrastructure issue.",
+                       "security": "Possible phishing, malware or credential compromise."}},
+        "blocks_work": {"type": "noul", "instructions": "The issue stops the employee from doing their core work.",
+          "criteria": {"false": "Work can continue with a workaround.", "true": "Core work is blocked."}},
+        "priority": {"type": "score", "instructions": "Ticket priority. Levels: 0 low, 1 normal, 2 high, 3 critical.",
+          "criteria": ["Low: cosmetic.", "Normal: one user, workaround exists.", "High: one user blocked or a team degraded.",
+                       "Critical: many users blocked or a security risk."]}
+      }
+    },
+    "sales_lead_qualification": {
+      "description": "An inbound sales lead with company firmographics, the contact's role, stated need and engagement history.",
+      "questions": {
+        "next_step": {"type": "choice", "instructions": "What should sales do with this lead?",
+          "criteria": {"book_demo": "Qualified; book a demo with an account executive.",
+                       "nurture": "Some fit but not ready; add to nurture.",
+                       "disqualify": "No fit or no budget.",
+                       "route_partner": "Better served by a partner or reseller."}},
+        "decision_maker": {"type": "noul", "instructions": "The contact has buying authority or directly influences the purchase.",
+          "criteria": {"false": "No evidence of authority or influence.", "true": "The contact is a decision maker or key influencer."}},
+        "intent": {"type": "score", "instructions": "Buying intent. Levels: 0 none, 1 low, 2 medium, 3 high.",
+          "criteria": ["None.", "Low: early research.", "Medium: active evaluation.", "High: budget, timeline and need all present."]}
+      }
+    },
+    "shipment_exception": {
+      "description": "A logistics shipment exception with carrier scans, promised delivery date, contents and customer tier.",
+      "questions": {
+        "action": {"type": "choice", "instructions": "How should operations handle this shipment exception?",
+          "criteria": {"wait": "Normal delay; the carrier will recover it.",
+                       "contact_carrier": "Open a trace with the carrier.",
+                       "reship": "Send a replacement now.",
+                       "refund_customer": "Refund and close; recovery is not worth it."}},
+        "likely_lost": {"type": "noul", "instructions": "The shipment is likely lost rather than delayed.",
+          "criteria": {"false": "Scans suggest it is still moving.", "true": "No movement for longer than the carrier's loss threshold."}},
+        "customer_impact": {"type": "score", "instructions": "Customer impact. Levels: 0 none, 1 minor, 2 significant, 3 severe.",
+          "criteria": ["None.", "Minor inconvenience.", "Significant: missed date that matters.", "Severe: business-critical or perishable."]}
+      }
+    },
+    "app_review_triage": {
+      "description": "A public app-store review with rating, app version, device and any linked support history.",
+      "questions": {
+        "route": {"type": "choice", "instructions": "Which team should act on this review?",
+          "criteria": {"engineering_bug": "Describes a reproducible defect.",
+                       "product_feedback": "A feature request or UX complaint.",
+                       "support_reply": "The user needs help using the app.",
+                       "no_action": "Praise or unactionable text."}},
+        "reports_crash": {"type": "noul", "instructions": "The review reports a crash, freeze or data loss.",
+          "criteria": {"false": "No crash, freeze or data loss is reported.", "true": "A crash, freeze or data loss is reported."}},
+        "sentiment": {"type": "score", "instructions": "User sentiment. Levels: 0 very negative, 1 negative, 2 positive, 3 very positive.",
+          "criteria": ["Very negative.", "Negative.", "Positive.", "Very positive."]}
+      }
+    },
+    "kyc_onboarding": {
+      "description": "A business customer onboarding file with registration data, owners, screening hits and the compliance policy.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "What should compliance decide on this onboarding?",
+          "criteria": {"approve": "All checks passed.",
+                       "request_documents": "A required document or ownership detail is missing.",
+                       "enhanced_due_diligence": "Higher risk; run enhanced due diligence first.",
+                       "reject": "Sanctions match or prohibited business."}},
+        "screening_hit_confirmed": {"type": "noul", "instructions": "A sanctions or watch-list hit is a true match to this customer.",
+          "criteria": {"false": "No hit, or the hit is a false positive by name, date of birth or country.",
+                       "true": "The hit matches the customer or an owner."}},
+        "risk": {"type": "score", "instructions": "Money-laundering risk. Levels: 0 low, 1 medium, 2 high, 3 prohibited.",
+          "criteria": ["Low.", "Medium.", "High: high-risk country, complex ownership or cash-heavy.", "Prohibited under policy."]}
+      }
+    },
+    "cloud_cost_alert": {
+      "description": "A cloud cost anomaly alert with the service, spend change, recent deployments and tags.",
+      "questions": {
+        "action": {"type": "choice", "instructions": "What should the platform team do about this cost alert?",
+          "criteria": {"ignore_expected": "Expected growth or a planned event.",
+                       "rightsize": "Over-provisioned resources; downsize.",
+                       "stop_resource": "Idle or runaway resource; stop it now.",
+                       "investigate_security": "Possible compromised credentials, for example crypto-mining."}},
+        "caused_by_deploy": {"type": "noul", "instructions": "The spend increase started with a recent deployment or config change.",
+          "criteria": {"false": "No deployment lines up with the increase.", "true": "A deployment or config change lines up with the increase."}},
+        "urgency": {"type": "score", "instructions": "Urgency. Levels: 0 none, 1 this week, 2 today, 3 now.",
+          "criteria": ["None.", "This week.", "Today: large waste accruing.", "Now: runaway or security issue."]}
+      }
+    },
+    "procurement_request": {
+      "description": "An internal purchase request with vendor, amount, budget line, contracts on file and the purchasing policy.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "How should procurement handle this purchase request?",
+          "criteria": {"approve": "Within budget and policy.",
+                       "need_quotes": "Policy requires competitive quotes at this amount.",
+                       "route_to_legal": "New vendor terms or data processing need legal review.",
+                       "reject": "Not allowed by policy or no budget."}},
+        "within_budget": {"type": "noul", "instructions": "The request fits the remaining budget on its budget line.",
+          "criteria": {"false": "It exceeds the remaining budget.", "true": "It fits the remaining budget."}},
+        "vendor_risk": {"type": "score", "instructions": "Vendor risk. Levels: 0 low, 1 moderate, 2 high, 3 unacceptable.",
+          "criteria": ["Low: approved vendor.", "Moderate: new but reputable.", "High: handles sensitive data without assurances.",
+                       "Unacceptable: sanctioned or failed due diligence."]}
+      }
+    },
+    "email_intent": {
+      "description": "An inbound email to a shared business inbox with sender, subject, body and thread history.",
+      "questions": {
+        "intent": {"type": "choice", "instructions": "What is the sender's main intent?",
+          "criteria": {"purchase_inquiry": "Wants to buy or get pricing.",
+                       "support_request": "Needs help with an existing product or order.",
+                       "complaint": "Is unhappy and wants redress.",
+                       "spam_or_phishing": "Unsolicited, deceptive or malicious."}},
+        "needs_reply_today": {"type": "noul", "instructions": "The email needs a reply today.",
+          "criteria": {"false": "It can wait.", "true": "A same-day reply is needed."}},
+        "phishing_likelihood": {"type": "score", "instructions": "Likelihood the email is phishing. Levels: 0 none, 1 low, 2 likely, 3 certain.",
+          "criteria": ["None.", "Low.", "Likely: lookalike domain or credential request.", "Certain: known malicious link or payload."]}
+      }
+    },
+    "database_change_review": {
+      "description": "A proposed production database migration with the SQL, table sizes, traffic and the rollback plan.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "Should this migration run as proposed?",
+          "criteria": {"approve": "Safe to run as written.",
+                       "run_off_peak": "Safe but should run in a low-traffic window.",
+                       "rewrite": "Needs changes, for example batching or an online index build.",
+                       "block": "Destructive or irreversible without a tested rollback."}},
+        "locks_hot_table": {"type": "noul", "instructions": "The migration takes a blocking lock on a high-traffic table.",
+          "criteria": {"false": "No blocking lock on a hot table.", "true": "It blocks writes or reads on a hot table."}},
+        "risk": {"type": "score", "instructions": "Operational risk. Levels: 0 none, 1 low, 2 high, 3 critical.",
+          "criteria": ["None.", "Low.", "High: long locks or large rewrites.", "Critical: data loss possible."]}
+      }
+    },
+    "ad_policy_review": {
+      "description": "An advertisement submitted to an ad network, with its text, landing page summary, targeting and the ad policy.",
+      "questions": {
+        "decision": {"type": "choice", "instructions": "What should the ad reviewer decide?",
+          "criteria": {"approve": "Complies with the policy.",
+                       "restrict": "Allowed only with age or region restrictions.",
+                       "request_changes": "Fixable violation such as a misleading claim.",
+                       "reject": "Prohibited product or deceptive practice."}},
+        "misleading_claim": {"type": "noul", "instructions": "The ad makes a misleading or unsubstantiated claim.",
+          "criteria": {"false": "Claims are accurate or substantiated.", "true": "At least one claim is misleading or unsubstantiated."}},
+        "risk": {"type": "score", "instructions": "User-harm risk. Levels: 0 none, 1 low, 2 moderate, 3 high.",
+          "criteria": ["None.", "Low.", "Moderate: financial or health claims.", "High: scams or dangerous products."]}
+      }
+    },
+    "incident_postmortem": {
+      "description": "A production incident summary with timeline, customer impact, root cause notes and remediation items.",
+      "questions": {
+        "classification": {"type": "choice", "instructions": "What is the primary root-cause category?",
+          "criteria": {"code_change": "A code deploy introduced the fault.",
+                       "config_change": "A configuration or feature-flag change.",
+                       "capacity": "Load exceeded capacity.",
+                       "third_party": "An external dependency failed."}},
+        "customer_facing": {"type": "noul", "instructions": "Customers were affected by the incident.",
+          "criteria": {"false": "Internal only.", "true": "Customers saw errors, slowness or data problems."}},
+        "severity": {"type": "score", "instructions": "Severity. Levels: 0 SEV4, 1 SEV3, 2 SEV2, 3 SEV1.",
+          "criteria": ["SEV4: negligible.", "SEV3: minor degradation.", "SEV2: major feature down for some customers.",
+                       "SEV1: outage or data loss for many customers."]}
+      }
+    },
+    "grant_application": {
+      "description": "A research or community grant application with goals, budget, team and the funder's criteria.",
+      "questions": {
+        "recommendation": {"type": "choice", "instructions": "What should the reviewer recommend?",
+          "criteria": {"fund": "Strong on every criterion.",
+                       "fund_with_changes": "Fund if the budget or scope is revised.",
+                       "resubmit": "Promising but not ready.",
+                       "decline": "Does not meet the funder's criteria."}},
+        "eligible": {"type": "noul", "instructions": "The applicant meets the funder's eligibility rules.",
+          "criteria": {"false": "An eligibility rule is not met.", "true": "Every eligibility rule is met."}},
+        "impact": {"type": "score", "instructions": "Expected impact. Levels: 0 minimal, 1 modest, 2 strong, 3 exceptional.",
+          "criteria": ["Minimal.", "Modest.", "Strong.", "Exceptional."]}
+      }
+    }
+  }
+}

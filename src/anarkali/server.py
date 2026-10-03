@@ -14,17 +14,19 @@ from typing import Any
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
 
-def _engine_from_env(model_path: str | None, threads: int | None):
+def _engine_from_env(model_path: str | None, threads: int | None, orders: int | None = None):
     from .engine import Engine
 
     selected = model_path or os.getenv("ANARKALI_MODEL")
     if not selected:
         raise RuntimeError("ANARKALI_MODEL or --model is required")
-    return Engine.load(selected, threads=threads)
+    if orders is None and os.getenv("ANARKALI_ORDERS"):
+        orders = int(os.environ["ANARKALI_ORDERS"])
+    return Engine.load(selected, threads=threads, orders=orders)
 
 
 def create_app(*, engine: Any | None = None, model_path: str | None = None,
-               threads: int | None = None, api_key: str | None = None):
+               threads: int | None = None, api_key: str | None = None, orders: int | None = None):
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
 
@@ -32,7 +34,7 @@ def create_app(*, engine: Any | None = None, model_path: str | None = None,
     if selected_threads is None and os.getenv("ANARKALI_THREADS"):
         selected_threads = int(os.environ["ANARKALI_THREADS"])
     app = FastAPI(title="Anarkali", version="0.3.0")
-    app.state.engine = engine or _engine_from_env(model_path, selected_threads)
+    app.state.engine = engine or _engine_from_env(model_path, selected_threads, orders)
     app.state.api_key = api_key if api_key is not None else os.getenv("ANARKALI_API_KEY")
     app.state.inference_lock = asyncio.Lock()
     app.state.executor = ThreadPoolExecutor(max_workers=1)
@@ -98,10 +100,10 @@ def create_app(*, engine: Any | None = None, model_path: str | None = None,
 
 
 def serve(*, model_path: str | None = None, host: str | None = None,
-          port: int | None = None, threads: int | None = None) -> None:
+          port: int | None = None, threads: int | None = None, orders: int | None = None) -> None:
     import uvicorn
 
-    app = create_app(model_path=model_path, threads=threads)
+    app = create_app(model_path=model_path, threads=threads, orders=orders)
     uvicorn.run(app, host=host or os.getenv("ANARKALI_HOST", "0.0.0.0"),
                 port=port or int(os.getenv("ANARKALI_PORT", "8000")))
 

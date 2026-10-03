@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/examples/claude-code/anarkali_guard.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

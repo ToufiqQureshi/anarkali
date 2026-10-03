@@ -1,0 +1,66 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core (no extras, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e .
+      - run: python -m unittest discover -s tests -v
+
+  older-transformers:
+    # Older ModernBERT builds its own attention masks; Kaggle's image had it and broke shared positions.
+    name: Shared positions on transformers 4.57
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e . "transformers==4.57.1"
+      - run: python -m unittest tests.test_shared_positions tests.test_training_v4 tests.test_distill_pipeline -v
+
+  full:
+    name: Full (torch + ONNX + released model)
+    runs-on: ubuntu-latest
+    env:
+      ANARKALI_RELEASE_DIR: ${{ github.workspace }}/.model
+      ANARKALI_REQUIRE_RELEASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU torch and all extras
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[encoder,serve]" httpx onnx
+      - name: Cache released model
+        uses: actions/cache@v4
+        with:
+          path: .model
+          key: anarkali-model-${{ hashFiles('pyproject.toml') }}
+      - name: Download released model
+        run: |
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('toufiqqureshi651/anarkali', local_dir='.model')"
+      - run: python -m unittest discover -s tests -v

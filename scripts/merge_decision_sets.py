@@ -1,7 +1,8 @@
 """Concatenate prepared decision sets split-by-split into one training directory.
 
 Default: typed-decisions-v2 (public benchmark) + coding-decisions-v0 (synthetic coding
-workflows) -> anarkali-decisions-v3. Source groups must not collide across inputs.
+workflows) -> anarkali-decisions-v3. A source group may appear in several inputs (the harvested
+gold and pool sets share their texts) but never in two different splits.
 """
 import argparse
 import hashlib
@@ -31,22 +32,26 @@ def main():
         lines = []
         groups = set()
         for directory in args.inputs:
-            for line in (directory/f'{name}.jsonl').read_text(encoding='utf-8').splitlines():
-                if not line.strip():
-                    continue
-                group = json.loads(line)['source_group']
-                owner = seen_groups.setdefault(group, (directory.name, name))
-                if owner != (directory.name, name):
-                    raise ValueError(f'source group {group} appears in {owner} and {(directory.name, name)}')
-                groups.add(group)
-                lines.append(line)
+            # str.splitlines() also splits at valid JSON characters such as U+2028/U+2029. Public
+            # text can contain those characters inside a quoted string, so consume JSONL only at
+            # its actual CR/LF record boundaries.
+            with (directory/f'{name}.jsonl').open(encoding='utf-8', newline='') as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    group = json.loads(line)['source_group']
+                    owner = seen_groups.setdefault(group, (directory.name, name))
+                    if owner[1] != name:
+                        raise ValueError(f'source group {group} appears in {owner} and {(directory.name, name)}')
+                    groups.add(group)
+                    lines.append(line.rstrip('\r\n'))
         path = args.output/f'{name}.jsonl'
         path.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
         counts[name] = {'decision_cases': len(lines), 'source_groups': len(groups),
                         'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     revision = hashlib.sha256(json.dumps([m.get('revision') for m in manifests]).encode()).hexdigest()[:16]
     manifest = {'dataset': 'anarkali-decisions-v3', 'revision': revision,
-                'sources': [{'path': str(d.relative_to(REPO)), 'dataset': m.get('dataset'), 'revision': m.get('revision'),
+                'sources': [{'path': str(d.resolve().relative_to(REPO) if d.resolve().is_relative_to(REPO) else d), 'dataset': m.get('dataset'), 'revision': m.get('revision'),
                              'label_source': m.get('label_source')} for d, m in zip(args.inputs, manifests)],
                 'split_unit': 'source groups inherited from each input; no group appears in two splits',
                 'split_counts': counts}

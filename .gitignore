@@ -8,3 +8,7 @@ dist/
 artifacts/
 checkpoints/
 .env
+.model/
+.kaggle-run/
+results.zip
+anarkali-150m-best.pt

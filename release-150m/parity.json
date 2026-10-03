@@ -1,0 +1,83 @@
+{
+  "model.onnx": {
+    "rows": 200,
+    "max_probability_drift": 1.9609205511028627e-06,
+    "argmax_mismatches": 0,
+    "bytes": 597077969,
+    "threads": "default",
+    "samples": 25,
+    "warmup": 10,
+    "cpu_latency_p50_ms": 446.12760000745766,
+    "cpu_latency_p95_ms": 703.9073199965059,
+    "latency_includes": "tokenization + packing + onnxruntime, batch 1",
+    "passed": true
+  },
+  "model.optimized.onnx": {
+    "rows": 200,
+    "max_probability_drift": 1.9609205511028627e-06,
+    "argmax_mismatches": 0,
+    "bytes": 596881435,
+    "threads": "default",
+    "samples": 25,
+    "warmup": 10,
+    "cpu_latency_p50_ms": 467.40319998934865,
+    "cpu_latency_p95_ms": 671.9744800007901,
+    "latency_includes": "tokenization + packing + onnxruntime, batch 1",
+    "passed": true
+  },
+  "selected_int8": null,
+  "thread_latency": {
+    "model.onnx": {
+      "1": {
+        "threads": 1,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 858.8456000143196,
+        "cpu_latency_p95_ms": 1183.9749200153162,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      },
+      "4": {
+        "threads": 4,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 600.8685000124387,
+        "cpu_latency_p95_ms": 830.1535199920179,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      },
+      "6": {
+        "threads": 6,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 625.4019000043627,
+        "cpu_latency_p95_ms": 879.1167800023686,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      }
+    },
+    "model.optimized.onnx": {
+      "1": {
+        "threads": 1,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 845.962099992903,
+        "cpu_latency_p95_ms": 1088.0350799881853,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      },
+      "4": {
+        "threads": 4,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 504.4867999968119,
+        "cpu_latency_p95_ms": 751.6308200196363,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      },
+      "6": {
+        "threads": 6,
+        "samples": 25,
+        "warmup": 10,
+        "cpu_latency_p50_ms": 467.9924999945797,
+        "cpu_latency_p95_ms": 546.1231999914162,
+        "latency_includes": "tokenization + packing + onnxruntime, batch 1"
+      }
+    }
+  }
+}

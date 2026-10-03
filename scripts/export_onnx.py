@@ -30,7 +30,8 @@ def percentile(values: list[float], q: float) -> float:
 
 
 def load_rows(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
-    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with path.open(encoding="utf-8") as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
     return rows if limit is None else rows[:limit]
 
 
@@ -43,7 +44,12 @@ def main():
     parser.add_argument("--name", default="anarkali-lite")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--abstain-below", type=float)
+    parser.add_argument("--temperature-by-type", type=json.loads, default=None,
+                        help='per-type temperatures fitted on held-out data, e.g. \'{"choice": 1.2, "noul": 0.9}\'')
+    parser.add_argument("--orders", type=int, default=1, help="default option orders the engine averages over")
     parser.add_argument("--max-int8-drift", type=float, default=0.02)
+    parser.add_argument("--no-int8", action="store_true",
+                        help="ship fp32 only; skips the int8 recipes, which take long on large encoders")
     parser.add_argument("--parity-rows", type=int, default=200)
     parser.add_argument("--latency-samples", type=int, default=100)
     args = parser.parse_args()
@@ -72,30 +78,37 @@ def main():
     shutil.copy(args.output / "hf-tokenizer" / "tokenizer.json", args.output / "tokenizer.json")
     shutil.rmtree(args.output / "hf-tokenizer")
 
+    shared = backend.model.shared_option_positions
+
     class Graph(torch.nn.Module):
         def __init__(self, model):
             super().__init__()
             self.model = model
 
-        def forward(self, input_ids, attention_mask, candidate_spans):
-            tokens = self.model.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+        def forward(self, input_ids, attention_mask, candidate_spans, position_ids=None):
+            tokens = self.model.encode(input_ids, attention_mask, position_ids)
             return self.model.head(tokens, candidate_spans)
 
     rows = load_rows(args.data / "development.jsonl", args.parity_rows)
-    example = _batch_arrays([pack_row(r, tokenizer, reference.max_tokens) for r in rows[:2]], tokenizer.pad_token_id)
+    example = _batch_arrays([pack_row(r, tokenizer, reference.max_tokens) for r in rows[:2]],
+                            tokenizer.pad_token_id, shared)
+    names = ["input_ids", "attention_mask", "candidate_spans"] + (["position_ids"] if shared else [])
+    axes = {
+        "input_ids": {0: "batch", 1: "tokens"},
+        "attention_mask": {0: "batch", 1: "tokens"},
+        "candidate_spans": {0: "batch", 1: "options", 2: "tokens"},
+        "logits": {0: "batch", 1: "options"},
+    }
+    if shared:
+        axes["position_ids"] = {0: "batch", 1: "tokens"}
     fp32 = args.output / "model.onnx"
     torch.onnx.export(
         Graph(backend.model).eval(),
         tuple(torch.from_numpy(a) for a in example),
         str(fp32),
-        input_names=["input_ids", "attention_mask", "candidate_spans"],
+        input_names=names,
         output_names=["logits"],
-        dynamic_axes={
-            "input_ids": {0: "batch", 1: "tokens"},
-            "attention_mask": {0: "batch", 1: "tokens"},
-            "candidate_spans": {0: "batch", 1: "options", 2: "tokens"},
-            "logits": {0: "batch", 1: "options"},
-        },
+        dynamic_axes=axes,
         opset_version=17,
         dynamo=False,
     )
@@ -106,6 +119,9 @@ def main():
         "max_tokens": reference.max_tokens,
         "temperature": args.temperature,
         "abstain_below": args.abstain_below,
+        **({"temperature_by_type": args.temperature_by_type} if args.temperature_by_type else {}),
+        **({"orders": args.orders} if args.orders != 1 else {}),
+        **({"shared_option_positions": True} if shared else {}),
         "question_types": ["choice", "noul", "score"],
         "tokenizer": {
             "cls_token_id": tokenizer.cls_token_id,
@@ -256,7 +272,7 @@ def main():
         raise SystemExit(f"fp32 ONNX parity failed: {fp32_metrics}")
 
     passing_int8 = []
-    for recipe in recipes:
+    for recipe in [] if args.no_int8 else recipes:
         graph_path = args.output / recipe["graph"]
         try:
             recipe["fn"](graph_path)

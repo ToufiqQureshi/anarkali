@@ -13,6 +13,7 @@ import base64
 import gzip
 import json
 from pathlib import Path
+import re
 
 REPO = Path(__file__).resolve().parents[1]
 OUTPUT = REPO / "notebooks" / "Anarkali_V3.ipynb"
@@ -36,17 +37,40 @@ def cell(source, cell_id, kind="code"):
     return base if kind == "markdown" else {**base, "execution_count": None, "outputs": []}
 
 
+def existing_payload():
+    """Reuse immutable embedded datasets when local generated artifacts are absent."""
+    if not OUTPUT.exists():
+        return {}
+    notebook = json.loads(OUTPUT.read_text(encoding="utf-8"))
+    for cell_data in notebook["cells"]:
+        source = "".join(cell_data["source"])
+        if "PAYLOAD = (" not in source:
+            continue
+        body = source[source.index("PAYLOAD = ("):]
+        chunks = re.findall(r"'([A-Za-z0-9+/=]+)'", body[:body.index(")")])
+        return json.loads(gzip.decompress(base64.b64decode("".join(chunks))).decode("utf-8"))
+    return {}
+
+
 def collect_files():
     files = {}
+    embedded = existing_payload()
     for folder in ("src", "scripts"):
         for path in sorted((REPO / folder).rglob("*.py")):
             if "__pycache__" not in path.parts:
                 files[path.relative_to(REPO).as_posix()] = path.read_text(encoding="utf-8")
     for dataset, splits in DATA.items():
         base = REPO / "artifacts" / dataset
-        files[f"artifacts/{dataset}/manifest.json"] = (base / "manifest.json").read_text(encoding="utf-8")
-        for split in splits:
-            files[f"artifacts/{dataset}/{split}.jsonl"] = (base / f"{split}.jsonl").read_text(encoding="utf-8")
+        names = ["manifest.json", *(f"{split}.jsonl" for split in splits)]
+        for name in names:
+            key = f"artifacts/{dataset}/{name}"
+            path = base / name
+            if path.exists():
+                files[key] = path.read_text(encoding="utf-8")
+            elif key in embedded:
+                files[key] = embedded[key]
+            else:
+                raise FileNotFoundError(f"{path} is missing and {key} is not embedded in {OUTPUT}")
     return files
 
 

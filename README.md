@@ -123,6 +123,24 @@ curl -s localhost:8000/v1/systemone -d @examples/requests/support_routing.json
 
 Set `ANARKALI_API_KEY` to require a bearer token.
 
+### Order averaging and calibrated temperatures
+
+The packed encoder reads options at fixed positions, so reordering them can change a borderline answer. Pass `orders` to score each question under several cyclic option orders and average the probabilities. The cost is `orders` times the compute.
+
+```python
+engine = Engine.load("toufiqqureshi651/anarkali", orders=3)   # or: anarkali serve --orders 3
+```
+
+Measured on the typed-decisions test split, 2,000 decisions, CPU:
+
+| `orders` | Accuracy | ECE | ms per decision |
+|---:|---:|---:|---:|
+| 1 (default) | 74.0% | 0.134 | 103 |
+| 2 | 74.35% | 0.138 | 186 |
+| 3 | 74.55% | 0.141 | 244 |
+
+`anarkali.json` may also carry `temperature_by_type`: one temperature per question type, fitted on held-out data. For 0.3.0 the fitted values are 1.00 to 1.10 and do not improve test calibration, so the release ships without them. `scripts/benchmark_release.py` and the **Benchmark** workflow produce these numbers for any release.
+
 ## Coding decisions
 
 | Workflow | Questions | Accuracy |
@@ -132,6 +150,8 @@ Set `ANARKALI_API_KEY` to require a bearer token.
 | `coding_agent_step` | next_action · constraint_violation · progress | 70.0% |
 
 Measured on 440 held-out cases (78.6% overall). These cases are synthetic and rule-labelled, so they show the workflows work, not how the model does on your repositories. A GitHub Action example lives in [`examples/github/`](examples/github/).
+
+A Claude Code guardrail hook that asks `constraint_violation` before each tool call lives in [`examples/claude-code/`](examples/claude-code/). It is a demo until the model is trained on real agent traces.
 
 ## How it works
 
@@ -173,6 +193,61 @@ The export only ships a graph that matches PyTorch on 200 development decisions 
 
 Tests: `python -m unittest discover -s tests`
 
+### Relabel with open teachers
+
+`scripts/relabel_with_teachers.py` relabels the training split with several open LLMs (for example Qwen and Mistral) through any OpenAI-compatible endpoint: vLLM on a free Kaggle or Colab GPU, Groq or OpenRouter. Each teacher is averaged over 3 option orders, rows the teachers disagree on go to `dropped-train.jsonl` for review, and the test split is copied byte for byte so benchmark scores stay comparable. Responses are cached, so a run cut short by a rate limit resumes where it stopped.
+
+```bash
+python scripts/relabel_with_teachers.py --input artifacts/typed-decisions-v2 --output artifacts/typed-decisions-v2-relabel \
+  --teacher qwen=Qwen/Qwen3-30B-A3B-Instruct-2507@http://localhost:8000/v1 \
+  --teacher mistral=<mistral-model-id>@https://openrouter.ai/api/v1 --rpm 20
+```
+
+API keys come from `<NAME>_API_KEY` (here `MISTRAL_API_KEY`). Check each model's licence before training on its outputs.
+
+### Real agent traces for `coding_agent_step`
+
+`scripts/import_agent_traces.py` turns public coding-agent runs into `coding_agent_step` decisions. It uses four Hugging Face datasets: nebius SWE-agent (CC-BY-4.0), nebius SWE-rebench OpenHands (CC-BY-4.0), nvidia SWE-Zero OpenHands (CC-BY-4.0) and Kwai-Klear SWE-smith (MIT).
+- Labels are weak. Progress comes from the run's outcome, next action from what a successful agent did next, and violations from rule patterns.
+- A share of steps get an injected rule-breaking action, such as a force push or editing tests.
+- Splits are by GitHub issue.
+- Relabel the result with teachers, and keep a hand-labelled set for the final score.
+
+```bash
+python scripts/import_agent_traces.py --per-source 2000 --output artifacts/agent-step-traces-v0
+```
+
+### Training V4
+
+[`notebooks/Anarkali_V4.ipynb`](notebooks/Anarkali_V4.ipynb) rebuilds the data from its sources and trains a bake-off on one T4. It runs the 0.3.0 recipe as the control against recipes using the V4 training options:
+- Brier and ranked-probability losses
+- option-order consistency
+- layer-wise LR decay, warmup and EMA
+- `--shared-option-positions`: every option starts at the same position ID, so the encoder cannot see the order of the options. The ModernBERT/Ettin local window is measured in positions too.
+
+It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) has the plan and the reasoning.
+
+### Distillation: more data, a 400M teacher, a 68M student
+
+Anarkali is a typed + general decision model. [docs/DATA_AND_DISTILLATION.md](docs/DATA_AND_DISTILLATION.md) is the step-by-step guide: the row format, where the data comes from, ten DeepSeek generation runs, and the notebook settings.
+
+The V4 400M model reached 78.7% on typed-decisions but is six times slower than the 68M one. [`notebooks/Anarkali_Distill.ipynb`](notebooks/Anarkali_Distill.ipynb) moves its knowledge into the 68M model.
+- `harvest_public_decisions.py` streams large public datasets into typed decisions. The default is permissive licences only: Civil Comments (CC0), Amazon polarity (Apache-2.0), CLINC150 (CC-BY-3.0), GoEmotions (Apache-2.0), CommonsenseQA (MIT) and deepset prompt-injections (Apache-2.0). Share-alike sets need `--allow-share-alike`.
+- It writes two sets. `gold` holds the datasets' own human labels, soft where raters disagreed. `pool` holds the same texts with in-domain catalog questions for teachers to label.
+- `label_with_checkpoint.py` labels any set with the 400M checkpoint, averaged over option orders.
+- `relabel_with_teachers.py --brio-teacher NAME=MODEL@URL` adds a [colibri](https://github.com/JustVugg/colibri) Brio server as a teacher. It reads option probabilities from a large open model, one request per state.
+- `generate_domain_decisions.py` writes new cases with an open model such as DeepSeek or Qwen, for the four benchmark workflows (`scripts/domains/benchmark.json`) and 20 general domains. Each prompt varies industry, region, tone, length and difficulty, steers toward rare answers, and asks for the generator's own probabilities, which are kept as one teacher.
+- `combine_teachers.py` fits each teacher's temperature on the human-labelled calibration rows, then mixes the teachers with the human label.
+- `train_anarkali.py --teacher-checkpoint` distils online: the student sees the same option order as the teacher (KL at a temperature plus option-vector matching). With `--dev-data`, each epoch is selected on the benchmark's own development cases.
+- The notebook trains a no-teacher control next to the student, so the gain is measured, not assumed. Test splits and the real-world CI cases are opened only after that choice.
+
+```bash
+python scripts/harvest_public_decisions.py --output artifacts/public-decisions-v0 --max-per-source 50000
+python scripts/label_with_checkpoint.py --checkpoint bb-ettin-400m-best.pt --input artifacts/public-decisions-v0/pool \
+  --output artifacts/public-pool-t400 --name anarkali400m --fill-unlabelled
+python scripts/combine_teachers.py --input artifacts/public-pool-t400 --output artifacts/public-pool-combined
+```
+
 ## Limits
 
 - English only.
@@ -182,4 +257,4 @@ Tests: `python -m unittest discover -s tests`
 
 ## Credits
 
-Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Built on the [Ettin](https://huggingface.co/jhu-clsp/ettin-encoder-68m) encoder (JHU CLSP, MIT). Benchmark data: [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (Apache-2.0). The `/v1/systemone` format follows Jev's public API, and the typed-question design follows Jev and Laya. Anarkali never trains on Jev outputs.
+Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Built on the [Ettin](https://huggingface.co/jhu-clsp/ettin-encoder-68m) encoder (JHU CLSP, MIT). Benchmark data: [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (Apache-2.0). Distillation data: the public datasets listed above; a harvest writes their credits to `CREDITS.md`. The `/v1/systemone` format follows Jev's public API, and the typed-question design follows Jev and Laya. Anarkali never trains on Jev outputs.
