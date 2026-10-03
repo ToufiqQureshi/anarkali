@@ -22,20 +22,31 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 ## Why Anarkali
 
 - **Ships with a local 150M ONNX release.** `release-150m/` contains the graph, tokenizer and config needed for CPU inference.
-- **More accurate than Jev** on the public typed-decisions benchmark in the 0.3.0 68M baseline (74.0% vs 72.7%), and the current repo now includes the 150M release path and a hard routing benchmark for further iteration.
+- **More accurate than Jev** on the public typed-decisions benchmark: the 0.3.0 68M baseline scores 74.0% vs Jev's 72.7%. The 150M release has not been scored on that benchmark yet.
 - **Honest confidence.** The project optimizes calibration and selective accuracy, not just top-1 accuracy.
-- **Knows when to stay quiet.** Every answer carries an `abstain` flag. Answers above 0.7 probability are right 94.8% of the time.
+- **Knows when to stay quiet.** Every answer carries an `abstain` flag. On the 0.3.0 benchmark, answers above 0.7 probability were right 94.8% of the time.
 - **Drop-in API.** Speaks the `/v1/systemone` format used by Jev and Laya: point an existing client at a new URL.
 - **Runs anywhere.** The released 150M ONNX graphs run without PyTorch. Large ONNX files are stored with Git LFS.
+- **Hard routing benchmark.** 32 targeted cases in `benchmarks/anarkali-routing-v1/` track the failure modes the next release must fix.
 - **Coding decisions built in.** CI failure triage, PR review triage and agent-step checks.
 
 ## Benchmarks
 
-### Current 150M release smoke / hard routing suite
+### Releases
 
-This repository includes a local ONNX release at [`release-150m/`](release-150m/) and a targeted routing benchmark at [`benchmarks/anarkali-routing-v1/cases.jsonl`](benchmarks/anarkali-routing-v1/cases.jsonl).
+| Release | Backbone | Parameters | Where | Status |
+|---|---|---:|---|---|
+| **150M** (current) | [Ettin encoder 150M](https://huggingface.co/jhu-clsp/ettin-encoder-150m) | 149M | [`release-150m/`](release-150m/), Hugging Face | ONNX FP32, parity passed |
+| 0.3.0 | [Ettin encoder 68M](https://huggingface.co/jhu-clsp/ettin-encoder-68m) | 68M | superseded | public typed-decisions baseline |
 
-Current local result:
+150M release checks ([`release-150m/parity.json`](release-150m/parity.json)):
+
+- PyTorch-to-ONNX parity on 200 rows: 0 changed answers, max probability drift 1.96e-6.
+- CPU latency, batch 1, tokenization included: p50 446 ms, p95 704 ms. The 68M model measured 103 ms on a GitHub Actions runner, so expect roughly 4× the cost (different machines). int8 has not been validated yet.
+
+### Hard routing suite (150M)
+
+A targeted routing benchmark lives at [`benchmarks/anarkali-routing-v1/cases.jsonl`](benchmarks/anarkali-routing-v1/cases.jsonl). Current 150M result:
 
 ```text
 32 hard routing cases
@@ -58,7 +69,7 @@ The hard suite focuses on the failure modes that matter most for improvement:
 - security vs identity edge cases
 - temporal traps and long-context signal burial
 
-### Public typed-decisions benchmark
+### Public typed-decisions benchmark (0.3.0, 68M)
 
 2,000 held-out decisions from [`LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions) (revision `468b146`). The model was chosen on development data before the test split was opened.
 
@@ -129,6 +140,8 @@ print(result["answers"]["needs_finance_approval"])
 # {'type': 'noul', 'noul': 0.6658, 'confidence': 0.6658, 'abstain': False}
 ```
 
+The `.onnx` files in `release-150m/` are Git LFS objects. After cloning, run `git lfs pull` before loading the local release, or the graph will be a small pointer file.
+
 Three question types:
 
 | Type | Use it for | Answer |
@@ -165,7 +178,7 @@ The packed encoder reads options at fixed positions, so reordering them can chan
 engine = Engine.load("toufiqqureshi651/anarkali", orders=3)   # or: anarkali serve --orders 3
 ```
 
-Measured on the typed-decisions test split, 2,000 decisions, CPU:
+Measured with the 0.3.0 68M model on the typed-decisions test split, 2,000 decisions, CPU (the 150M release costs roughly 4× more per pass):
 
 | `orders` | Accuracy | ECE | ms per decision |
 |---:|---:|---:|---:|
@@ -192,13 +205,15 @@ A Claude Code guardrail hook that asks `constraint_violation` before each tool c
 ```mermaid
 flowchart LR
     A["state + question<br/>+ every option"] --> B["one packed sequence<br/>(512 tokens)"]
-    B --> C["Ettin encoder<br/>68M parameters"]
+    B --> C["Ettin encoder<br/>150M parameters"]
     C --> D["mean-pool each<br/>option's tokens"]
     D --> E["small scoring head"]
     E --> F["softmax →<br/>probabilities + abstain"]
 ```
 
 All options are read together with the state, so the model compares them against each other in a single pass instead of scoring each one alone. Training targets are the teacher's full probability distributions, not hard labels, which is where the calibration comes from.
+
+The current release uses Ettin-150M; 0.3.0 used Ettin-68M, picked by the bake-off below.
 
 **Backbone bake-off** (7,880 training decisions, same recipe, Colab T4, chosen on 1,040 development decisions):
 
@@ -225,13 +240,7 @@ python scripts/export_onnx.py --checkpoint best.pt --output release
 
 The export only ships a graph that matches PyTorch on 200 development decisions (0 changed answers for the released fp32 model; every int8 variant failed and was dropped).
 
-Tests: `python -m unittest discover -s tests`
-
-Release benchmark tests:
-
-```bash
-python -m pytest tests/test_release_benchmark.py
-```
+Tests: `python -m unittest discover -s tests` (release benchmark only: `python -m pytest tests/test_release_benchmark.py`).
 
 ### Relabel with open teachers
 

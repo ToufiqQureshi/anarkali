@@ -1,8 +1,10 @@
-# Anarkali roadmap: how a 68M model becomes the default typed-decision engine
+# Anarkali roadmap: how a compact model becomes the default typed-decision engine
 
 This is the plan to make Anarkali the model people reach for when software has to make a small decision many times: fast, cheap, open, and honest about how sure it is. It covers where we stand, what "number one" should mean, the work already in the repo, and the order in which to do the rest.
 
 ## 1. Where we stand
+
+**Update, 2026-10-03.** The 150M release (Ettin-150M, ONNX FP32) is in [`release-150m/`](release-150m/) and on Hugging Face. ONNX parity passed (0 changed answers on 200 rows). CPU latency is p50 446 ms, about 4× the 68M model. On the 32-case hard routing suite (`benchmarks/anarkali-routing-v1/`) it scores 75.0%. It has not been scored on the typed-decisions test split yet, so the table below is still the 0.3.0 68M baseline. The local `.pt` checkpoint was removed from this repo.
 
 Public typed-decisions benchmark, test split, 2,000 decisions:
 
@@ -31,12 +33,12 @@ Four things, all measured. We claim number one only where a number supports it.
 3. **General.** Good on domains it was not trained on, measured on a held-out-domain set we publish.
 4. **The guardrail for AI coding agents.** A step checker fast enough to run on every tool call of Claude Code, Codex or OpenHands.
 
-## 3. Shipped in this PR
+## 3. Shipped so far
 
 | Change | Where | What it buys | How to run |
 |---|---|---|---|
 | **Option-order averaging** at inference | `Engine(orders=N)`, `anarkali decide/serve --orders` | Measured: 74.0% → 74.55% at `orders=3`, for 2.4× the latency. It is an opt-in accuracy mode, not the default. | `Engine.load(path, orders=3)` |
-| **Per-type temperatures** | `anarkali.json: temperature_by_type`, `export_onnx.py --temperature-by-type` | Support for recalibrating a release on held-out data. Measured tonight, 0.3.0 is already calibrated: the fitted temperatures are 1.00 to 1.10. The benchmark recommends temperatures only when they help. | fitted by `benchmark_release.py` and `evaluate_checkpoint.py` |
+| **Per-type temperatures** | `anarkali.json: temperature_by_type`, `export_onnx.py --temperature-by-type` | Support for recalibrating a release on held-out data. Measured on 0.3.0, it is already calibrated: the fitted temperatures are 1.00 to 1.10. The benchmark recommends temperatures only when they help. | fitted by `benchmark_release.py` and `evaluate_checkpoint.py` |
 | **Release benchmark in CI** | `scripts/benchmark_release.py`, `.github/workflows/benchmark.yml` | Real numbers on the real model for every inference change: accuracy, KL from gold, ECE, Brier, selective accuracy, truncation, latency. | Actions → Benchmark → Run |
 | **Training objectives** | `src/anarkali/objectives.py`, `train_anarkali.py` flags | Brier beside soft CE; ranked probability score for ordinal questions (our weakest type, 71.6%); permutation-consistency R-Drop; layer-wise LR decay; warmup and decay schedule; EMA weights; per-row weights from teacher agreement. All off by default. | `--brier-weight --rps-weight --consistency-weight --llrd --schedule --ema-decay --weight-field` |
 | **Shared option positions** (architecture) | `--shared-option-positions`, `PackedChoiceModel.encode` | Every option starts at the same position ID, and ModernBERT's local window is measured in positions. The encoder cannot see option order at all, at 1× compute. On an Ettin-shaped model, the score change under permutation drops from 9e-4 to 6e-8, and ONNX export keeps it. It must be trained, and it is a V4 recipe. | V4 notebook `v4-shared` |
@@ -46,11 +48,13 @@ Four things, all measured. We claim number one only where a number supports it.
 | **Real agent traces** | `scripts/import_agent_traces.py` | about 530k public coding-agent runs (80k + 67k + 318k + 66k) from 4 CC-BY/MIT datasets become `coding_agent_step` data, with injected rule-breaking steps. | `--per-source 2000` |
 | **20-domain generator** | `scripts/generate_domain_decisions.py`, `scripts/domains/catalog.json` | Breadth: HR, moderation, insurance, loans, fraud, contracts, IT, KYC, cloud cost, DB migrations and more, at five difficulty styles. | see the script's docstring |
 
-Every piece has tests that run without a network or GPU. None of it has trained a model yet: that needs a GPU, and it is step 2 below.
+| **150M ONNX release + hard routing suite** | `release-150m/`, `benchmarks/anarkali-routing-v1/`, `scripts/evaluate_release_suite.py` | A larger model with verified ONNX parity, and a 32-case benchmark of routing failure modes (scope, product vs identity, billing vs entitlement, temporal traps, long context). | `python scripts/evaluate_release_suite.py --model release-150m --cases benchmarks/anarkali-routing-v1/cases.jsonl` |
+
+Every piece has tests that run without a network or GPU.
 
 ## 4. The plan, in order
 
-### Step 1: inference settings, measured (done tonight)
+### Step 1: inference settings, measured (done)
 
 The Benchmark workflow scored the released 0.3.0 model on the typed-decisions test split, 2,000 decisions:
 
@@ -94,9 +98,9 @@ Decisions:
 
 ### Step 5: month 2, the model family
 
-- `anarkali` (68M, default, CPU), `anarkali-large` (Ettin-150M or 400M, when accuracy matters), and optionally `anarkali-mini` (Ettin-32M, edge).
+- `anarkali` (68M, default, CPU), `anarkali-large` (Ettin-150M or 400M, when accuracy matters), and optionally `anarkali-mini` (Ettin-32M, edge). The 150M ONNX release is out; it still needs a typed-decisions score and a faster CPU path.
 - Raise `packed-max-tokens` to 1024 for log-heavy workflows, trained at that length. Ettin supports about 8k positions.
-- Revisit int8 quantisation with static calibration. Every dynamic int8 variant failed the parity gate.
+- Revisit int8 quantisation with static calibration. Every dynamic int8 variant failed the parity gate, and the 150M release ships without int8 (`selected_int8: null` in `parity.json`). At 446 ms p50 it needs this most.
 
 ### Step 6: visibility
 
