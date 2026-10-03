@@ -1,41 +1,39 @@
 <#
-Run the recovered 150M Anarkali model locally.
+Run the released 150M Anarkali ONNX model locally.
 
 From the repository root:
   powershell -ExecutionPolicy Bypass -File .\run_150m_demo.ps1
 #>
 param(
-    [switch] $Cpu
+    [string] $Request = "examples\requests\support_routing.json"
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$python = Join-Path $root '.venv\Scripts\python.exe'
-$checkpoint = Join-Path $root 'anarkali-150m-best.pt'
+$venvPython = Join-Path $root '.venv\Scripts\python.exe'
+$python = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
+$model = Join-Path $root 'release-150m'
+$requestPath = Join-Path $root $Request
 
-if (-not (Test-Path -LiteralPath $python)) {
-    throw "Python was not found at $python"
+if (-not (Test-Path -LiteralPath $model)) {
+    throw "Released model directory was not found at $model"
 }
-if (-not (Test-Path -LiteralPath $checkpoint)) {
-    throw "Recovered model was not found at $checkpoint"
+if (-not (Test-Path -LiteralPath (Join-Path $model 'model.onnx'))) {
+    throw "ONNX graph was not found at $model"
+}
+if (-not (Test-Path -LiteralPath $requestPath)) {
+    throw "Request fixture was not found at $requestPath"
 }
 
-& $python -c 'import torch, transformers' 2>$null
+& $python -c 'import onnxruntime, tokenizers, numpy' 2>$null
 $ready = $LASTEXITCODE -eq 0
 if (-not $ready) {
-    Write-Host 'Installing the model runtime (first run only)...'
-    & $python -m pip install --upgrade 'torch>=2.5,<3' 'transformers>=4.48,<6' 'safetensors>=0.4'
+    Write-Host 'Installing the ONNX runtime (first run only)...'
+    & $python -m pip install --upgrade 'onnxruntime>=1.18' 'tokenizers>=0.19' 'numpy'
     if ($LASTEXITCODE -ne 0) {
-        throw 'Model runtime installation failed.'
+        throw 'ONNX runtime installation failed.'
     }
 }
 
-if ($Cpu) {
-    $device = 'cpu'
-} else {
-    & $python -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)'
-    $device = if ($LASTEXITCODE -eq 0) { 'cuda' } else { 'cpu' }
-}
-
-Write-Host "Running recovered Ettin 150M on $device..."
-& $python (Join-Path $root 'scripts\demo_recovered_checkpoint.py') --checkpoint $checkpoint --device $device
+Write-Host "Running released Anarkali 150M from $model..."
+& $python -m anarkali decide --model $model --request $requestPath
