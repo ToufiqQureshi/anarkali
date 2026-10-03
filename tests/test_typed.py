@@ -1,6 +1,7 @@
 import unittest
 
-from anarkali.typed import concentration, format_answer, question_candidates
+from anarkali.typed import (concentration, format_answer, question_candidates,
+                           validate_question, validate_state)
 
 
 class TypedQuestionTests(unittest.TestCase):
@@ -72,6 +73,23 @@ class TypedQuestionTests(unittest.TestCase):
         self.assertAlmostEqual(concentration([0.5, 0.5]), 0.0)
         self.assertAlmostEqual(concentration([1.0, 0.0]), 1.0)
         self.assertAlmostEqual(concentration([0.2, 0.3, 0.5]), 0.25)
+
+    def test_validate_question_requires_typed_schema(self):
+        normalized = validate_question({
+            "type": "choice",
+            "instructions": "Pick a route.",
+            "criteria": {"sales": "Sales lead.", "support": "Support request."},
+        })
+        self.assertEqual(normalized["type"], "choice")
+        self.assertEqual(normalized["criteria"], {"sales": "Sales lead.", "support": "Support request."})
+
+        with self.assertRaises(ValueError):
+            validate_question({"type": "noul", "instructions": "x", "criteria": {"false": "F", "true": 1}})
+
+    def test_validate_state_rejects_non_json_state(self):
+        validate_state({"invoice": "INV-42", "amount": 1200})
+        with self.assertRaises(ValueError):
+            validate_state(object())
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 - **Honest confidence.** The project optimizes calibration and selective accuracy, not just top-1 accuracy.
 - **Knows when to stay quiet.** Every answer carries an `abstain` flag. On the 0.3.0 benchmark, answers above 0.7 probability were right 94.8% of the time.
 - **Drop-in API.** Speaks the `/v1/systemone` format used by Jev and Laya: point an existing client at a new URL.
+- **Type-safe by contract.** Every question and state payload is normalized and validated before inference, so the API behaves like a strict Jev/Laya-style decision schema rather than an ad hoc JSON bag.
 - **Runs anywhere.** The released 150M ONNX graphs run without PyTorch. Large ONNX files are stored with Git LFS.
 - **Hard routing benchmark.** 32 targeted cases in `benchmarks/anarkali-routing-v1/` track the failure modes the next release must fix.
 - **Coding decisions built in.** CI failure triage, PR review triage and agent-step checks.
@@ -70,6 +71,23 @@ The hard suite focuses on the failure modes that matter most for improvement:
 - billing vs product entitlement confusion
 - security vs identity edge cases
 - temporal traps and long-context signal burial
+
+### Real-world CI evaluation
+
+The separate [`realworld-ci-v0` set](benchmarks/realworld-ci-v0/cases.jsonl) contains 65 hand-labelled CI failure cases. On 2026-10-03, the current 150M Hub model got **5/65 (7.7%)** correct on the `cause` question, compared with **75.4%** for an always-most-common-label baseline. Mean probability assigned to the correct label was 0.205; on this machine p50 latency was 1.58 s and p95 was 2.31 s per case. This is a poor result and means the model is **not ready to triage real CI failures automatically**. Keep this workflow in shadow mode or require human review; do not let it retry, block, or release code by itself.
+
+Reproduce the evaluation and inspect every case in the generated report:
+
+```bash
+python scripts/realworld_benchmark.py \
+  --cases benchmarks/realworld-ci-v0/cases.jsonl \
+  --model anarkali=toufiqqureshi651/anarkali \
+  --output artifacts/realworld-ci-v0
+```
+
+The 32-case routing suite and CI-failure benchmark cover different tasks and neither is large enough to guarantee performance on your data. Run both, add representative cases from your own workflow, and set a minimum acceptance threshold before deployment.
+
+On these same scenarios, averaging 3 option orders raised CI `cause` accuracy to **8/65 (12.3%)**, still far below the majority baseline; hard routing was **23/32 (71.9%)**, below the default single-order result. It does not make the CI workflow production-ready. The two shipped ONNX graphs (`model.onnx` and `model.optimized.onnx`) returned the same top answers on all 97 cases across these suites.
 
 ### Public typed-decisions benchmark (0.3.0, 68M)
 
@@ -152,7 +170,7 @@ Three question types:
 | `noul` | true or false | `noul` = probability of true |
 | `score` | pick a level on an ordered scale | `score` = expected level + a probability per level |
 
-For `noul`, describe what true and false mean in `criteria`, as above. Without it the model leans towards false.
+This follows the Jev/Laya shape: `state` is JSON-like, each `question` has a strict `type`, `instructions`, and `criteria`, and invalid schemas are rejected before inference. For `noul`, describe what true and false mean in `criteria`, as above. Without it the model leans towards false.
 
 ### From the command line
 
@@ -171,6 +189,22 @@ curl -s localhost:8000/v1/systemone -d @examples/requests/support_routing.json
 ```
 
 Set `ANARKALI_API_KEY` to require a bearer token.
+
+### Docker
+
+With Docker Engine and the Compose plugin installed, start the CPU API:
+
+```bash
+export ANARKALI_API_KEY='replace-with-a-long-random-secret'
+docker compose up --build -d
+curl http://localhost:8000/health
+curl http://localhost:8000/v1/systemone \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ANARKALI_API_KEY" \
+  --data-binary @examples/requests/support_routing.json
+```
+
+The first start downloads the public model from Hugging Face (about 1.2 GB) into a persistent Docker volume. For a private Hub model, also export `HF_TOKEN`. The default port is bound to `127.0.0.1`; the container runs as a non-root user. `docker compose logs -f` shows startup and request logs, and `docker compose down` stops the service without deleting the model cache. Set `ANARKALI_MODEL` to use another Hub repository, `ANARKALI_ORDERS` to trade speed for option-order averaging, or `ANARKALI_THREADS` to limit CPU threads. If exposing the API beyond localhost, keep `ANARKALI_API_KEY` set and put TLS/authentication at a trusted reverse proxy.
 
 ### Order averaging and calibrated temperatures
 

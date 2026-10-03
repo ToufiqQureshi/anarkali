@@ -22,7 +22,7 @@ Supported question types:
 - `noul`: true/false probability.
 - `score`: expected score over ordered levels.
 
-The release is intended for fast, structured decisions such as routing, triage, classification, and lightweight guardrail checks.
+The request contract follows the Jev/Laya shape: each question is type-checked before inference, `state` must be JSON-safe, and each `criteria` object or list must match the required schema for the selected question type. This keeps the API compact, structured, and type-safe for routing, triage, classification, and lightweight guardrail checks.
 
 ## Release files
 
@@ -114,6 +114,19 @@ Known weak areas:
 - Temporal cases can confuse old/resolved issues with the current unresolved issue.
 - Confidence is useful, but not perfect; some wrong answers have moderate confidence.
 - The current hard benchmark is still small and should grow to hundreds or thousands of cases.
+
+### Hand-labelled real CI failures
+
+On 2026-10-03, the released Hub model was evaluated on all 65 cases in `benchmarks/realworld-ci-v0/cases.jsonl`. It predicted the `cause` label correctly on **5/65 cases (7.7%)**; an always-most-common-label baseline scores **75.4%**. Mean probability on the gold label was 0.205. Per-case latency on the evaluation machine was p50 1.58 s and p95 2.31 s. This is evidence that the synthetic coding workflow results do not transfer to these real CI logs. The model is not suitable for automated CI triage or release gating without retraining and a passing, independently labelled evaluation.
+
+Three-order averaging scored **8/65 (12.3%)** on those CI cases and **23/32 (71.9%)** on the hard routing suite, so it did not close the CI generalization gap. The shipped optimized ONNX graph matched the primary graph's top answers on all 97 cases in these two suites.
+
+Reproduce with:
+
+```bash
+python scripts/realworld_benchmark.py --cases benchmarks/realworld-ci-v0/cases.jsonl \
+  --model anarkali=toufiqqureshi651/anarkali --output artifacts/realworld-ci-v0
+```
 
 Current failure themes:
 

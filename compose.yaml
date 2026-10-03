@@ -1,0 +1,20 @@
+services:
+  anarkali:
+    build: .
+    image: anarkali:local
+    restart: unless-stopped
+    environment:
+      ANARKALI_MODEL: ${ANARKALI_MODEL:-toufiqqureshi651/anarkali}
+      ANARKALI_HOST: 0.0.0.0
+      ANARKALI_PORT: "8000"
+      ANARKALI_API_KEY: ${ANARKALI_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      ANARKALI_THREADS: ${ANARKALI_THREADS:-}
+      ANARKALI_ORDERS: ${ANARKALI_ORDERS:-1}
+    ports:
+      - "127.0.0.1:${ANARKALI_PORT:-8000}:8000"
+    volumes:
+      - hf-cache:/home/anarkali/.cache/huggingface
+
+volumes:
+  hf-cache:
