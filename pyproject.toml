@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "anarkali"
 version = "0.3.0"
-description = "Compact typed decision engine with a Jev-compatible API"
+description = "Compact 150M typed-decision engine with local ONNX release and a Jev-compatible API"
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "Apache-2.0"}
