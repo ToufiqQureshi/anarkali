@@ -31,6 +31,8 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 
 ## Benchmarks
 
+For an honest quality/use-case assessment, see the [150M model card](docs/MODEL_CARD_150M.md).
+
 ### Current 150M release smoke / hard routing suite
 
 This repository includes a local ONNX release at [`release-150m/`](release-150m/) and a targeted routing benchmark at [`benchmarks/anarkali-routing-v1/cases.jsonl`](benchmarks/anarkali-routing-v1/cases.jsonl).
