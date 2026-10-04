@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Firecrawl__firecrawl_search",
+      "mcp__github__get_job_logs",
+      "Bash(git rm *)"
+    ]
+  }
+}
