@@ -41,8 +41,6 @@ Anarkali is being retrained as a cheap decision layer for web data work: scrapin
 
 ## Benchmarks
 
-For an honest quality/use-case assessment, see the [150M model card](docs/MODEL_CARD_150M.md).
-
 ### Releases
 
 | Release | Backbone | Parameters | Where | Status |
@@ -318,11 +316,11 @@ python scripts/import_agent_traces.py --per-source 2000 --output artifacts/agent
 - layer-wise LR decay, warmup and EMA
 - `--shared-option-positions`: every option starts at the same position ID, so the encoder cannot see the order of the options. The ModernBERT/Ettin local window is measured in positions too.
 
-It picks on development data, then tests and exports. [ROADMAP.md](ROADMAP.md) has the plan and the reasoning.
+It picks on development data, then tests and exports.
 
 ### Distillation: more data, a 400M teacher, a 68M student
 
-Anarkali is a typed + general decision model. [docs/DATA_AND_DISTILLATION.md](docs/DATA_AND_DISTILLATION.md) is the step-by-step guide: the row format, where the data comes from, ten DeepSeek generation runs, and the notebook settings.
+Anarkali is a typed + general decision model.
 
 The V4 400M model reached 78.7% on typed-decisions but is six times slower than the 68M one. [`notebooks/Anarkali_Distill.ipynb`](notebooks/Anarkali_Distill.ipynb) moves its knowledge into the 68M model.
 - `harvest_public_decisions.py` streams large public datasets into typed decisions. The default is permissive licences only: Civil Comments (CC0), Amazon polarity (Apache-2.0), CLINC150 (CC-BY-3.0), GoEmotions (Apache-2.0), CommonsenseQA (MIT) and deepset prompt-injections (Apache-2.0). Share-alike sets need `--allow-share-alike`.

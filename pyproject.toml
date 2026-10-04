@@ -21,7 +21,6 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/ToufiqQureshi/anarkali"
 Model = "https://huggingface.co/toufiqqureshi651/anarkali"
-Roadmap = "https://github.com/ToufiqQureshi/anarkali/blob/main/ROADMAP.md"
 
 [project.optional-dependencies]
 neural = ["torch>=2.5,<3"]
