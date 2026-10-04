@@ -19,6 +19,14 @@ Give it a situation, a question and the allowed answers. It returns a probabilit
 
 ---
 
+## Web decisions (new direction)
+
+Anarkali is being retrained as a cheap decision layer for web data work: scraping, crawling, price and competitor monitoring. It sits in front of your code or LLM and answers small typed questions about a page, such as `page_type`, `price_field` and `in_stock`.
+
+- **Train it:** open [`Anarkali_Web_Train.ipynb`](Anarkali_Web_Train.ipynb) on Colab or Kaggle with a GPU and run all cells. It streams real pages from Common Crawl, labels them from their own schema.org markup, trains, scores against baselines on unseen sites, and exports ONNX.
+- **Use the same page format at inference:** `from anarkali.web import page_state, PAGE_TYPE_QUESTION, IN_STOCK_QUESTION`.
+- The dataset builder is [`scripts/build_web_decisions.py`](scripts/build_web_decisions.py). Labels are real but noisy (sites mark up schema.org imperfectly). No web-decision results are published yet.
+
 ## Why Anarkali
 
 - **Ships with a local 150M ONNX release.** `release-150m/` contains the graph, tokenizer and config needed for CPU inference.
