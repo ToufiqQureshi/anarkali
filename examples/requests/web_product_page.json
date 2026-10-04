@@ -1,0 +1,36 @@
+{
+  "state": {
+    "url": "https://shop.example/p/steel-bottle",
+    "title": "Steel Bottle 1L | Shop",
+    "text": "Steel Bottle 1L\nMRP ₹1,999.00 Sale price ₹1,299.00\nOnly 3 left in stock. Add to cart.\nFree delivery across India on orders above Rs. 499. Easy 7 day returns.",
+    "link_count": 0
+  },
+  "questions": {
+    "page_type": {
+      "type": "choice",
+      "instructions": "What kind of web page is this?",
+      "criteria": {
+        "product": "A single product page that sells one item",
+        "listing": "A listing, category or search results page showing many items",
+        "article": "An article, blog post or news story",
+        "other": "Another kind of page, such as a home, about, contact, event or recipe page"
+      }
+    },
+    "in_stock": {
+      "type": "noul",
+      "instructions": "The product on this page is in stock and can be bought now.",
+      "criteria": {
+        "false": "The product is out of stock or unavailable.",
+        "true": "The product is in stock and can be bought now."
+      }
+    },
+    "price_field": {
+      "type": "choice",
+      "instructions": "Which text shows this product's current selling price?",
+      "criteria": {
+        "p0": "MRP [₹1,999.00] Sale price ₹1,299.00",
+        "p1": "MRP ₹1,999.00 Sale price [₹1,299.00]"
+      }
+    }
+  }
+}
