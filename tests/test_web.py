@@ -1,4 +1,5 @@
 """Web decisions: page states, schema.org labels and the Common Crawl dataset builder (offline)."""
+from collections import Counter
 import importlib.util
 import io
 import json
@@ -187,6 +188,28 @@ class BuilderTests(unittest.TestCase):
             for name in ("development", "calibration", "test"):
                 for line in (out / f"{name}.jsonl").read_text().splitlines():
                     self.assertEqual(json.loads(line)["workflow"], "web")
+
+
+class DownsampleTests(unittest.TestCase):
+    """Runs without warcio: the WARC reader is replaced by a list of pages."""
+
+    def test_non_product_pages_are_downsampled_and_products_kept(self):
+        spec = importlib.util.spec_from_file_location("build_web_decisions", REPO / "scripts" / "build_web_decisions.py")
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        pages = []
+        for h in range(200):
+            pages.append((f"https://shop{h}.example/p", product_html()))
+            pages.append((f"https://news{h}.example/a", article_html()))
+        builder.html_records = lambda stream, max_pages: iter(pages)
+        rows, stats = builder.collect([("mem", lambda: None)], max_pages_per_warc=10_000,
+                                      max_pages_per_host=5, non_product_keep=0.3)
+        page_types = Counter(builder.gold_label(r) for r in rows if r["case_id"].endswith("page_type"))
+        self.assertEqual(page_types["product"], 200)
+        self.assertTrue(30 <= page_types["article"] <= 90, page_types)
+        self.assertEqual(stats["skipped_non_product_pages"], 200 - page_types["article"])
+        self.assertEqual(builder.collect([("mem", lambda: None)], max_pages_per_warc=10_000,
+                                         max_pages_per_host=5)[1]["labelled_pages"], 400)
 
 
 if __name__ == "__main__":

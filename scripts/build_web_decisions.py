@@ -82,7 +82,16 @@ def html_records(stream, max_pages: int):
             return
 
 
-def collect(sources, *, max_pages_per_warc, max_pages_per_host, log_every=2000):
+def keep_page(rows, url: str, non_product_keep: float) -> bool:
+    """Keep every product page; keep other pages with probability non_product_keep (stable per URL)."""
+    if non_product_keep >= 1:
+        return True
+    if any(question_key(r) == "page_type" and gold_label(r) == "product" for r in rows):
+        return True
+    return int(hashlib.sha256(url.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF < non_product_keep
+
+
+def collect(sources, *, max_pages_per_warc, max_pages_per_host, non_product_keep=1.0, log_every=2000):
     """sources: iterable of (name, opener) where opener() returns a binary WARC stream."""
     rows_by_url, per_host, stats = {}, Counter(), Counter()
     for name, opener in sources:
@@ -98,7 +107,9 @@ def collect(sources, *, max_pages_per_warc, max_pages_per_host, log_every=2000):
                 if not host or url in rows_by_url or per_host[host] >= max_pages_per_host:
                     continue
                 rows = page_decisions(html, url, host)
-                if rows:
+                if rows and not keep_page(rows, url, non_product_keep):
+                    stats["skipped_non_product_pages"] += 1
+                elif rows:
                     rows_by_url[url] = rows
                     per_host[host] += 1
                     stats["labelled_pages"] += 1
@@ -190,6 +201,8 @@ def main():
     p.add_argument("--warc-files", nargs="*", default=None, help="local .warc.gz files instead of downloading")
     p.add_argument("--max-pages-per-warc", type=int, default=40_000)
     p.add_argument("--max-pages-per-host", type=int, default=20)
+    p.add_argument("--non-product-keep", type=float, default=1.0,
+                   help="share of non-product pages to keep (all product pages are kept), e.g. 0.3")
     p.add_argument("--max-label-ratio", type=float, default=3.0,
                    help="cap each page_type/in_stock label in train at this x the rarest; 0 disables")
     p.add_argument("--mix", type=Path, default=None, help="older prepared decision set to mix into train")
@@ -198,6 +211,8 @@ def main():
     args = p.parse_args()
     if not 0 <= args.mix_ratio < 1:
         raise SystemExit("--mix-ratio must be in [0, 1)")
+    if not 0 < args.non_product_keep <= 1:
+        raise SystemExit("--non-product-keep must be in (0, 1]")
 
     if args.warc_files:
         sources = [(f, (lambda f=f: open(f, "rb"))) for f in args.warc_files]
@@ -216,7 +231,7 @@ def main():
             return response.raw
         sources = [(u, (lambda u=u: opener(u))) for u in urls]
     rows, stats = collect(sources, max_pages_per_warc=args.max_pages_per_warc,
-                          max_pages_per_host=args.max_pages_per_host)
+                          max_pages_per_host=args.max_pages_per_host, non_product_keep=args.non_product_keep)
     if not rows:
         raise SystemExit("no labelled pages found; stream more WARCs")
     manifest = write_dataset(rows, args.output, seed=args.seed, max_ratio=args.max_label_ratio,
