@@ -44,6 +44,38 @@ Add one decision at a time. A decision ships only when it passes the quality bar
 6. **Never lose weights.** Keep `best.pt` with every run (Drive or a private HF repo). ONNX alone
    cannot be fine-tuned.
 
+## How to add a decision without forgetting the old ones
+
+One model serves every decision, so every new version is trained on **all** decisions at once
+(multi-task). Training only on the new decision makes the model forget the old ones.
+
+1. Add the label function for the new decision in `web.py`, plus tests. `page_decisions` must emit the
+   old decisions **and** the new one, so a single dataset build covers everything.
+2. Rebuild the dataset with the same `--seed`. Keep mixing the old typed-decisions data (`--mix`).
+3. Start from the previous version's `best.pt` instead of the base encoder. This needs an
+   `--init-checkpoint` flag in `train_anarkali.py`, which is **not built yet** (TODO). Until it exists,
+   train from the base encoder on the full mix.
+4. Regression gate: the new version must match or beat the previous version on every old decision's
+   test score, as well as pass the bar above on the new decision. A drop on an old decision blocks the
+   release.
+5. Upload `best.pt`, the dataset and `test-report.json` to `toufiqqureshi651/anarkali-web` (private) under
+   `runN/`, and add a row to the run log below.
+
+## Run log
+
+| Run | Decisions | Data | Training | Result | Where |
+|---|---|---|---|---|---|
+| run1 (2026-10-05) | page_type, price_field, in_stock | CC-MAIN-2026-39, 4 WARCs, 85k HTML pages, 43k labelled; 44k train rows (4.8k old mixed) | Ettin-150M packed, 512 tokens, bs 16, stopped after ~82 min on a T4 (at least 1 of 3 epochs) | test pending | HF `toufiqqureshi651/anarkali-web` → `run1/` |
+
+Lessons from run1:
+- A T4 trains about one epoch of 44k rows in roughly 30–40 min. Plan for that, or use `EPOCHS=2`,
+  `MAX_TOKENS=384` or a bigger GPU.
+- The notebook must show live training progress. Piping through `| tail` hid it for over an hour.
+- The VS Code/Antigravity Colab extension cannot download files over ~512 MB. Save checkpoints to HF
+  (or Drive) from inside the runtime instead.
+- Notebooks opened from `main` with `--depth 1` cannot `git checkout <branch>`. Use
+  `git fetch origin <branch> && git checkout FETCH_HEAD`.
+
 ## Repo map
 
 - `Anarkali_Web_Train.ipynb`: the one training notebook (Colab/Kaggle GPU). It builds data, trains,
