@@ -23,6 +23,14 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(report['soft_prior_accuracy'], 1)
         self.assertGreater(report['soft_prior_ce'], report['teacher_entropy'])
 
+    def test_page_specific_options_get_a_uniform_prior(self):
+        train = [self.row('train', [0.9, 0.1])]
+        dev = self.row('dev', [0.0, 1.0])
+        dev['candidates'] = [{'id': 'p0', 'text': 'MRP [₹1,999]'}, {'id': 'p1', 'text': 'Sale [₹1,299]'}]
+        report = development_controls(train, [dev])
+        self.assertEqual(report['development_rows_without_training_schema'], 1)
+        self.assertEqual(report['controls']['all']['hard_majority_accuracy'], 0.5)
+
     def test_leakage_and_nonfinite_targets_rejected(self):
         train = [self.row('same', [0.9, 0.1])]
         with self.assertRaises(ValueError):

@@ -51,19 +51,26 @@ def development_controls(train, development):
         for cid, probability in zip(ids, row['target']):
             mass[key][cid] += probability
     buckets = defaultdict(list)
+    unseen = 0
     for row in development:
         key = schema_key(row)
-        if key not in counts:
-            raise ValueError('development schema not found in training')
         ids = [c['id'] for c in row['candidates']]
         target = dict(zip(ids, row['target']))
         expected = ids[max(range(len(ids)), key=row['target'].__getitem__)]
-        hard_choice = min(ids, key=lambda cid: (-votes[key][cid], cid))
-        soft_choice = min(ids, key=lambda cid: (-mass[key][cid], cid))
-        prior = {cid: mass[key][cid] / counts[key] for cid in ids}
+        if key in counts:
+            hard_choice = min(ids, key=lambda cid: (-votes[key][cid], cid))
+            soft_choice = min(ids, key=lambda cid: (-mass[key][cid], cid))
+            prior = {cid: mass[key][cid] / counts[key] for cid in ids}
+            hard_accuracy, soft_accuracy = float(hard_choice == expected), float(soft_choice == expected)
+        else:
+            # Options unique to one page (e.g. the price strings on it): no training prior exists, so the
+            # baseline is a uniform guess.
+            unseen += 1
+            prior = {cid: 1 / len(ids) for cid in ids}
+            hard_accuracy = soft_accuracy = 1 / len(ids)
         metrics = {
-            'hard_majority_accuracy': float(hard_choice == expected),
-            'soft_prior_accuracy': float(soft_choice == expected),
+            'hard_majority_accuracy': hard_accuracy,
+            'soft_prior_accuracy': soft_accuracy,
             'random_choice_expected_accuracy': 1 / len(ids),
             'teacher_entropy': -math.fsum(p * math.log(p) for p in target.values() if p > 0),
             'soft_prior_ce': -math.fsum(target[cid] * math.log(max(prior[cid], 1e-12)) for cid in ids),
@@ -75,6 +82,7 @@ def development_controls(train, development):
         return {'decisions': len(items), **{k: math.fsum(x[k] for x in items) / len(items) for k in items[0]}}
     return {'split': 'development', 'train_source_groups': len(train_groups),
             'development_source_groups': len(development_groups),
+            'development_rows_without_training_schema': unseen,
             'controls': {key: aggregate(items) for key, items in buckets.items()},
             'note': 'Priors fit only on training labels; teacher entropy is a soft-CE floor, not a correctness ceiling.'}
 
