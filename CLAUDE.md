@@ -86,6 +86,9 @@ Lessons from run1:
 - The notebook must show live training progress. Piping through `| tail` hid it for over an hour.
 - The VS Code/Antigravity Colab extension cannot download files over ~512 MB. Save checkpoints to HF
   (or Drive) from inside the runtime instead.
+- run2 crashed at the start of training with `MAX_TOKENS=384`: price_field rows with 8 options need
+  ~350 tokens of schema, and packing requires 32 tokens of state. Keep 512. The dataset was already on
+  HF, so the notebook's `DATA_FROM` reuses it instead of rebuilding (~50 min saved).
 - Notebooks opened from `main` with `--depth 1` cannot `git checkout <branch>`. Use
   `git fetch origin <branch> && git checkout FETCH_HEAD`.
 
