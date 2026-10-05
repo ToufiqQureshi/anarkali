@@ -65,7 +65,21 @@ One model serves every decision, so every new version is trained on **all** deci
 
 | Run | Decisions | Data | Training | Result | Where |
 |---|---|---|---|---|---|
-| run1 (2026-10-05) | page_type, price_field, in_stock | CC-MAIN-2026-39, 4 WARCs, 85k HTML pages, 43k labelled; 44k train rows (4.8k old mixed) | Ettin-150M packed, 512 tokens, bs 16, stopped after ~82 min on a T4 (at least 1 of 3 epochs) | test pending | HF `toufiqqureshi651/anarkali-web` → `run1/` |
+| run1 (2026-10-05) | page_type, price_field, in_stock | CC-MAIN-2026-39, 4 WARCs, 85k HTML pages, 43k labelled; 44k train rows (4.8k old mixed) | Ettin-150M packed, 512 tokens, bs 16, stopped after ~82 min on a T4 (at least 1 of 3 epochs) | see below | HF `toufiqqureshi651/anarkali-web` → `run1/` |
+
+run1 test (unseen sites, uncalibrated argmax):
+
+| Decision | n | Model | Baseline | Confidence ≥ 0.9 |
+|---|---|---|---|---|
+| page_type | 2617 | 76.9% | 39.2% (always "other") | 24% of pages, 94.9% correct |
+| price_field | 165 | 46.7% | random pick (not computed) | 8% of pages, 100% correct |
+| in_stock | 305 | 88.2% | 86.9% (always "true") | 2% of pages |
+
+Overall dev 77.3%, calibrated ECE 0.020, 3.7% of answers change when options are reversed, GPU p50
+47 ms (CPU not measured). Verdict: page_type works; price_field is learning but has too little data
+(~2.1k train rows); in_stock has not been learned (only 578 out-of-stock train rows).
+Plan for run2: product-focused data (more WARCs, keep product pages, downsample the rest), finish all
+epochs with live progress, `MAX_TOKENS=384`, and score Julia-1 on the same test split as a baseline.
 
 Lessons from run1:
 - A T4 trains about one epoch of 44k rows in roughly 30–40 min. Plan for that, or use `EPOCHS=2`,
