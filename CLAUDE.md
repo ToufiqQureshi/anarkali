@@ -52,9 +52,8 @@ One model serves every decision, so every new version is trained on **all** deci
 1. Add the label function for the new decision in `web.py`, plus tests. `page_decisions` must emit the
    old decisions **and** the new one, so a single dataset build covers everything.
 2. Rebuild the dataset with the same `--seed`. Keep mixing the old typed-decisions data (`--mix`).
-3. Start from the previous version's `best.pt` instead of the base encoder. This needs an
-   `--init-checkpoint` flag in `train_anarkali.py`, which is **not built yet** (TODO). Until it exists,
-   train from the base encoder on the full mix.
+3. Start from the previous version's `best.pt` with `train_anarkali.py --init-checkpoint` (the notebook's
+   `INIT_FROM` setting downloads it from HF). The checkpoint must come from the same `--model`.
 4. Regression gate: the new version must match or beat the previous version on every old decision's
    test score, as well as pass the bar above on the new decision. A drop on an old decision blocks the
    release.

@@ -81,6 +81,27 @@ class TrainingPipelineTests(unittest.TestCase):
                 self.assertEqual(set(ablations), {'original','blank','shuffled_within_workflow'})
                 self.assertFalse((output/'anarkali-test.jsonl').exists())
 
+            # A second packed run continues from the first one's weights.
+            first = Path(tmp)/'packed'/'best.pt'
+            argv = ['train', '--data', str(data), '--output', str(Path(tmp)/'continued'), '--architecture', 'packed',
+                    '--epochs', '1', '--batch-size', '2', '--device', 'cpu', '--packed-max-tokens', '64',
+                    '--init-checkpoint', str(first)]
+            with (patch.object(sys,'argv',argv), patch('huggingface_hub.HfApi.model_info',return_value=SimpleNamespace(sha='fixture')),
+                 patch('transformers.AutoTokenizer.from_pretrained',return_value=tokenizer),
+                 patch('transformers.AutoModel.from_pretrained',side_effect=tiny_encoder),
+                 contextlib.redirect_stdout(io.StringIO()) as log):
+                trainer.main()
+            self.assertIn('"init_checkpoint"', log.getvalue())
+            continued = json.loads((Path(tmp)/'continued'/'training.json').read_text())
+            self.assertEqual(continued['run_config']['init_checkpoint'], str(first))
+            with (patch.object(sys,'argv',argv + ['--model', 'other/encoder']),
+                 patch('huggingface_hub.HfApi.model_info',return_value=SimpleNamespace(sha='fixture')),
+                 patch('transformers.AutoTokenizer.from_pretrained',return_value=tokenizer),
+                 patch('transformers.AutoModel.from_pretrained',side_effect=tiny_encoder),
+                 contextlib.redirect_stdout(io.StringIO())):
+                with self.assertRaises(ValueError):
+                    trainer.main()
+
 
 
 

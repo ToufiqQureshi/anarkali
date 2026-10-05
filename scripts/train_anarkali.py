@@ -95,6 +95,9 @@ def main():
     parser.add_argument("--ema-decay", type=float, default=0.0,
                         help="evaluate and save an exponential moving average of the weights (e.g. 0.999)")
     # Distillation from a trained packed checkpoint (e.g. the 400M winner) into this model
+    parser.add_argument("--init-checkpoint", type=Path, default=None,
+                        help="start from this packed best.pt (same --model) instead of a fresh head, "
+                             "to continue training on a dataset that still holds every earlier decision")
     parser.add_argument("--teacher-checkpoint", type=Path, default=None,
                         help="packed best.pt scored online on every training batch, under the same option order")
     parser.add_argument("--kd-weight", type=float, default=1.0, help="weight of KL(teacher || student)")
@@ -127,6 +130,8 @@ def main():
     use_objectives = bool(args.brier_weight or args.rps_weight or args.consistency_weight or args.weight_field)
     if args.teacher_checkpoint and args.architecture != "packed":
         raise ValueError("--teacher-checkpoint needs --architecture packed")
+    if args.init_checkpoint and args.architecture != "packed":
+        raise ValueError("--init-checkpoint needs --architecture packed")
     if args.kd_weight < 0 or args.hidden_weight < 0 or not 0.5 <= args.kd_temperature <= 10:
         raise ValueError("kd/hidden weights must be nonnegative and kd-temperature in [0.5, 10]")
     if args.hidden_weight and not args.teacher_checkpoint:
@@ -211,6 +216,13 @@ def main():
         model = JointChoiceModel(encoder).to(device)
     else:
         model = EncoderChoiceModel(encoder, HeadConfig(encoder_dim=encoder.config.hidden_size)).to(device)
+    if args.init_checkpoint:
+        start = torch.load(args.init_checkpoint, map_location=device, weights_only=False)
+        if start.get("model_id") != args.model:
+            raise ValueError(f"--init-checkpoint was trained from {start.get('model_id')!r}, not {args.model!r}")
+        model.load_state_dict(start["state_dict"])
+        print(json.dumps({"init_checkpoint": str(args.init_checkpoint), "init_epoch": start.get("epoch")}),
+              flush=True)
     teacher = projector = None
     if args.teacher_checkpoint:
         from anarkali.checkpoint import load_packed_checkpoint
@@ -230,6 +242,7 @@ def main():
     run_config = {**vars(args), "data": str(args.data), "output": str(args.output), "cache_dir": str(args.cache_dir),
                   "dev_data": str(args.dev_data) if args.dev_data else None,
                   "teacher_checkpoint": str(args.teacher_checkpoint) if args.teacher_checkpoint else None,
+                  "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
                   "teacher_model_id": teacher.raw["model_id"] if teacher else None,
                   "unlabelled_train_rows_teacher_filled": unlabelled_train,
                   "unlabelled_development_rows_skipped": unlabelled_dev,
