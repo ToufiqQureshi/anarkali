@@ -96,7 +96,10 @@ The Julia-1 baseline did not run: every row raised and was skipped (the cell now
 Verdict: page_type and price_field improved and are useful at ≥ 0.9 confidence; page_type is just
 under the 95% bar there. in_stock still barely beats majority. Epochs 2 and 3 made dev worse, so
 1–2 epochs are enough when starting from a checkpoint.
-Next: fix the Julia-1 baseline, try int8 for CPU latency, and get more out-of-stock labels.
+int8 (`Anarkali_Int8_Export.ipynb`, Kaggle CPU, 4 vCPUs): all 4 recipes failed parity (max probability
+drift 0.76–0.84, 16–145 of 200 answers flipped) and were only ~20% faster (int8 p50 ~1.16 s vs fp32
+~1.45 s on that machine). int8 is not a way to the 500 ms bar for this model; fewer tokens or a smaller
+encoder is.
 
 Lessons from run1:
 - A T4 trains about one epoch of 44k rows in roughly 30–40 min. Plan for that, or use `EPOCHS=2`,
