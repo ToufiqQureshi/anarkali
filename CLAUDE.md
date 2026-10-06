@@ -65,6 +65,7 @@ One model serves every decision, so every new version is trained on **all** deci
 | Run | Decisions | Data | Training | Result | Where |
 |---|---|---|---|---|---|
 | run1 (2026-10-05) | page_type, price_field, in_stock | CC-MAIN-2026-39, 4 WARCs, 85k HTML pages, 43k labelled; 44k train rows (4.8k old mixed) | Ettin-150M packed, 512 tokens, bs 16, stopped after ~82 min on a T4 (at least 1 of 3 epochs) | see below | HF `toufiqqureshi651/anarkali-web` → `run1/` |
+| run2 (2026-10-06) | page_type, price_field, in_stock | CC-MAIN-2026-39, 12 WARCs, 256k HTML pages (78k non-product skipped), 52k labelled; 59k train rows (4.8k old mixed) | from run1 `best.pt`, 512 tokens, bs 16, 3 epochs in ~2.6 h on a T4; best = epoch 1 (dev 79.6%, then 79.2%, 77.4%) | see below | HF → `run2/` |
 
 run1 test (unseen sites, uncalibrated argmax):
 
@@ -79,6 +80,23 @@ Overall dev 77.3%, calibrated ECE 0.020, 3.7% of answers change when options are
 (~2.1k train rows); in_stock has not been learned (only 578 out-of-stock train rows).
 Plan for run2: product-focused data (more WARCs, keep product pages, downsample the rest), finish all
 epochs with live progress, `MAX_TOKENS=384`, and score Julia-1 on the same test split as a baseline.
+
+run2 test (unseen sites; a different, more product-heavy split than run1, so the numbers are not directly comparable):
+
+| Decision | n | Model | Baseline | Confidence ≥ 0.9 |
+|---|---|---|---|---|
+| page_type | 3165 | 81.6% | 36.9% (majority) | 45% of pages, 94.0% correct |
+| price_field | 509 | 55.6% | 25.8% (random pick) | 20% of pages, 99.0% correct |
+| in_stock | 961 | 86.7% | 85.5% (majority) | 8% of pages, 98.8% correct |
+
+Overall test 79.8%, calibrated-by-type ECE 0.013, 5.0% of answers change when options are reversed,
+GPU p50 49 ms. ONNX parity passed (0 argmax mismatches on 200 rows), but CPU p50 is ~780 ms on
+Kaggle's CPU (fp32, 512 tokens), so it fails the 500 ms bar; int8 was not tried (`--no-int8`).
+The Julia-1 baseline did not run: every row raised and was skipped (the cell now prints the error).
+Verdict: page_type and price_field improved and are useful at ≥ 0.9 confidence; page_type is just
+under the 95% bar there. in_stock still barely beats majority. Epochs 2 and 3 made dev worse, so
+1–2 epochs are enough when starting from a checkpoint.
+Next: fix the Julia-1 baseline, try int8 for CPU latency, and get more out-of-stock labels.
 
 Lessons from run1:
 - A T4 trains about one epoch of 44k rows in roughly 30–40 min. Plan for that, or use `EPOCHS=2`,
@@ -95,7 +113,8 @@ Lessons from run1:
 ## Repo map
 
 - `Anarkali_Web_Train.ipynb`: the one training notebook (Colab/Kaggle GPU). It builds data, trains,
-  evaluates, exports and saves.
+  evaluates, exports and saves. Follow `RUN_CHECKLIST.md` for every run.
+- `Anarkali_Int8_Export.ipynb`: CPU-only notebook that adds an int8 ONNX graph to a finished run on HF.
 - `src/anarkali/web.py`: `page_state(html, url)` (the model input) and the schema.org labels. The same
   code runs at training and inference time.
 - `src/anarkali/engine.py`: inference (`Engine.load(path).predict(state, questions)`). `server.py` is
