@@ -101,6 +101,20 @@ drift 0.76–0.84, 16–145 of 200 answers flipped) and were only ~20% faster (i
 ~1.45 s on that machine). int8 is not a way to the 500 ms bar for this model; fewer tokens or a smaller
 encoder is.
 
+run2 real-world test (`Anarkali_RealWorld_Test.ipynb`, HF `run2/realworld/`): 6000 random pages from 5552
+sites outside the run's dataset (same crawl CC-MAIN-2026-39), plus the Zyte product benchmark (human labels).
+- page_type vs schema.org (n=2833): 77.3% (majority 38.7%); at ≥ 0.9: 30% of pages, 91.8% correct (below
+  the 95% bar; "other" only 79%). Only 24% of all pages get a confident page_type.
+- in_stock on Zyte human labels (n=140): 92.1%, below the 93.6% "always in stock" baseline; it found
+  0 of 9 out-of-stock pages. in_stock has not been learned.
+- price_field on Zyte (n=85): 62.4% (random 23.7%), confident on only 3.5%. Our price candidates missed
+  the true price on 49 of 140 pages (24 not in the first 8, 25 with fewer than 2 candidates).
+- Reading the review sample: the state's first ~400 characters are mostly navigation menus; login,
+  directory-index, forum, docs, soft-404 and placeholder pages have no class of their own; and some
+  schema.org labels are wrong (a "Not Found" page marked as a listing).
+Lesson: the model needs page structure (main content vs navigation), many more page types, and labels
+that are checked against more than one source.
+
 Lessons from run1:
 - A T4 trains about one epoch of 44k rows in roughly 30–40 min. Plan for that, or use `EPOCHS=2`,
   `MAX_TOKENS=384` or a bigger GPU.
