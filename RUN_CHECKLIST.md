@@ -51,7 +51,7 @@ session ends.
    - `INIT_FROM = "runN/web-run/best.pt"`;
    - `DATA_FROM = "runN/web-decisions-v0"`;
    - set `EPOCHS` to the epochs still left.
-4. Add the lesson to `CLAUDE.md` (Lessons), so the same failure does not happen twice.
+4. Add the lesson to `RUNS.md` (Lessons), so the same failure does not happen twice.
 
 ## After the run
 
@@ -62,7 +62,7 @@ session ends.
    - `release-web/` (ONNX).
 2. **Compare with the previous run** on every decision's test score. A drop on any decision blocks
    the release.
-3. Add a row to the run log in `CLAUDE.md`. Only use numbers from `test-report.json`.
+3. Add the run to `RUNS.md`. Only use numbers from `test-report.json`.
 4. Rotate any token that was shared in a chat or a log.
 
 ## Rules for changing the notebook
@@ -80,5 +80,5 @@ session ends.
 |---|---|---|
 | run1 | `| tail` hid progress for over an hour | live output |
 | run1 | files over ~512 MB could not be downloaded from Colab | upload to HF from inside the runtime |
-| run2 try 1 | `MAX_TOKENS=384`: price_field rows need up to 463 tokens of schema | keep 512; the preflight checks every row |
+| run2 try 1 | `MAX_TOKENS=384`: an 8-option question needs up to 463 tokens of schema | keep 512; the preflight checks every row |
 | run2 try 2 | `No module named anarkali.packing`: the kernel started before `pip install -e` | `sys.path.insert(0, REPO/src)` |
