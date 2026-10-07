@@ -68,8 +68,8 @@ LLM teacher labels may help training only if the teacher's terms allow training 
 4. **Calibration.** When confidence is 0.9 or higher, accuracy must be 95% or higher. Report the
    coverage at that threshold.
 5. **Latency.** p50 under 500 ms on CPU, batch 1. int8 ships only if the parity check passes.
-6. **Real-world check.** Before a release, run `Anarkali_RealWorld_Test.ipynb` on fresh pages and read
-   the review sample.
+6. **Real-world check.** Before a release, run `scripts/realworld_test.py` (CPU) on fresh pages from
+   unseen sites and read the review sample.
 7. **Never lose weights.** Keep `best.pt` with every run in the private HF repo. ONNX alone cannot be
    fine-tuned.
 
@@ -92,9 +92,8 @@ One model serves every decision, so every new version is trained on **all** deci
 
 - `Anarkali_Web_Train.ipynb`: the training notebook (Colab/Kaggle GPU). It builds data, trains,
   evaluates, exports and saves. Follow `RUN_CHECKLIST.md` for every run.
-- `Anarkali_RealWorld_Test.ipynb`: scores a finished run on fresh pages from unseen sites and saves a
-  review sample.
-- `Anarkali_Int8_Export.ipynb`: CPU-only notebook that adds an int8 ONNX graph to a finished run.
+- `scripts/realworld_test.py`: scores a finished run on fresh pages from unseen sites and saves a review
+  sample (CPU, local).
 - `RUNS.md`: past runs, results and lessons.
 - `src/anarkali/web.py`: `page_state(html, url)` (the model input) and the labels. The same code runs
   at training and inference time.

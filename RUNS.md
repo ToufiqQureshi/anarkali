@@ -8,6 +8,52 @@ is the lessons at the bottom.
 |---|---|---|---|---|
 | run1 (2026-10-05) | page_type, price_field, in_stock | CC-MAIN-2026-39, 4 WARCs, 85k HTML pages, 43k labelled; 44k train rows (4.8k old mixed) | Ettin-150M packed, 512 tokens, bs 16, stopped after ~82 min on a T4 (at least 1 of 3 epochs) | HF `toufiqqureshi651/anarkali-web` → `run1/` |
 | run2 (2026-10-06) | page_type, price_field, in_stock | CC-MAIN-2026-39, 12 WARCs, 256k HTML pages (78k non-product skipped), 52k labelled; 59k train rows (4.8k old mixed) | from run1 `best.pt`, 512 tokens, bs 16, 3 epochs in ~2.6 h on a T4; best = epoch 1 (dev 79.6%, then 79.2%, 77.4%) | HF → `run2/` |
+| run3 (2026-10-06) | page_type (22), page_status, language, published_date | web-expert-v1: CC-MAIN-2026-39, 12 + 3 error WARCs, 268k HTML pages; page_type/page_status rows re-read by Qwen3-4B (8.3k of 27.5k dropped); 61.9k train decisions | base Ettin-150M (new `page_state`), 512 tokens, bs 16, 2 epochs in ~1.9 h on a T4; dev 96.5% → 96.8% | HF → `run3/` |
+
+## run3 test (unseen sites, calibrated by type, temperature 1.74)
+
+| Decision | n | Model | Baseline | Confidence ≥ 0.9 |
+|---|---|---|---|---|
+| language | 8011 | 99.7% | 20.0% (random) | 100% of answers, 99.8% correct |
+| page_status | 521 | 98.7% | 73.3% (majority ok) | 97%, 99.6% correct |
+| page_type | 851 | 81.3% | 14.3% (majority) | 57%, 97.1% correct |
+| published_date | 718 | 83.4% | 36.3% (random) | 60%, 98.6% correct |
+
+Overall 97.0%, ECE 0.005. 76 of the 159 page_type errors are article ↔ blog_post ↔ news_article: sites pick
+these schema.org types freely, so the label carries little page truth. page_status errors are all missed
+soft-404s (not_found → ok). ONNX parity passed (0 of 200 answers changed); CPU p50 1.13 s on Kaggle
+(optimized fp32), so the 500 ms bar fails.
+
+int8 (local i7-9750H, `export_onnx.py`): per_channel flipped 29 of 200 answers, reduce_range 4,
+matmul-only 5 (drift 0.72–0.97); best p50 1.20 s vs fp32 1.62 s. Static QDQ ran out of RAM. As in run2,
+int8 does not pass parity and is not the way to 500 ms.
+
+## run3 real-world test (`scripts/realworld_test.py`, local CPU, HF `run3/realworld/`)
+
+1500 pages from 1435 sites outside the run's dataset (CC-MAIN-2026-39 is still the newest crawl, so new
+sites, not newer pages): 1000 normal pages and 500 non-200 pages. 1.85 s per decision on the laptop CPU.
+
+| Against automatic labels | n | Model | Baseline | Confidence ≥ 0.9 |
+|---|---|---|---|---|
+| language | 578 | 99.5% | 28.9% | 99%, 99.5% correct |
+| page_status | 537 | 94.0% | 83.4% | 93%, 97.6% correct |
+| page_type | 104 | 59.6% | 30.8% | 43%, 100% correct |
+| published_date | 19 | 84.2% | 47.4% | too few |
+
+On all pages: page_status is confident on 87%; page_type on only 33% of the 1000 normal pages.
+Reading the 150-page review sample:
+- Hard 404s are caught on every page, in every language. A few soft errors too (a 200 forum "Error"
+  page → server_error, a 301 "page not found" → not_found).
+- page_type is also answered on 404 pages, sometimes confidently (a 404 under `/product/` → product 0.99):
+  the model leans on the URL. page_type must only be used when page_status is ok.
+- Confident page_type on normal pages is mostly right (tag/category archives, products, home pages,
+  forum threads, videos, news), but by eye about 1 in 10 is wrong (a forum index or settings page →
+  forum_thread, a file catalog → forum_thread), so it is below the 95% bar off the test set.
+- Common pages have no class: business service pages ("our services", "garage doors", "competences"),
+  directory indexes ("Index of /"), parked, placeholder and maintenance pages. The model spreads them
+  over article/blog_post with low confidence.
+- Some pages are mojibake (GBK, TIS-620, ISO-8859-2): the builder decodes by the HTTP charset only, not
+  `<meta charset>`. The same bug is in the training data.
 
 ## run1 test (unseen sites, uncalibrated argmax)
 
